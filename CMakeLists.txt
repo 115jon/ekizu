@@ -154,7 +154,7 @@ cpmaddpackage(
     NAME certify GITHUB_REPOSITORY "jontitorr/certify" GIT_TAG "master"
 )
 
-cpmaddpackage(NAME Opus GITHUB_REPOSITORY "xiph/opus" GIT_TAG "master")
+cpmaddpackage(NAME Opus GITHUB_REPOSITORY "xiph/opus" GIT_TAG "main")
 set(SEPARATE_DEPENDENCIES "${SEPARATE_DEPENDENCIES}Opus;;")
 
 cpmaddpackage(
