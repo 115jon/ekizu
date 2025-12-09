@@ -1,5 +1,6 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/ssl/ssl_stream.hpp>
 #include <boost/certify/https_verification.hpp>

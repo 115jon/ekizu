@@ -41,7 +41,7 @@ async_main(const asio::yield_context &yield) {
 
 	Snowflake bot_id;
 	HttpClient http{token};
-	Shard shard{ShardId::ONE, token, Intents::AllIntents};
+	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	// Attach logger to shard.
 	shard.attach_logger([](const Log &log) {

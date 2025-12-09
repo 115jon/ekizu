@@ -66,7 +66,7 @@ static int pa_callback(
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
 	HttpClient http{token};
-	Shard shard{ShardId::ONE, token, Intents::AllIntents};
+	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	shard.attach_logger([](const Log &log) {
 		fmt::println("{}", log.message);

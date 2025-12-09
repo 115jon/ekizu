@@ -73,7 +73,7 @@ Result<> load_sound() {
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
 	HttpClient http{token};
-	Shard shard{ShardId::ONE, token, Intents::AllIntents};
+	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	EKIZU_TRY(load_sound());
 

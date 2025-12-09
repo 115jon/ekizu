@@ -1,6 +1,7 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm/copy.hpp>
 #include <ekizu/async_main.hpp>
+#include <ekizu/embed_builder.hpp>
 #include <ekizu/http_client.hpp>
 #include <ekizu/shard.hpp>
 #include <nlohmann/json.hpp>
@@ -22,7 +23,7 @@ async_main(const asio::yield_context &yield) {
 	std::string token{std::getenv("DISCORD_TOKEN")};
 	Snowflake bot_id;
 	HttpClient http{token};
-	Shard shard{ShardId::ONE, token, Intents::AllIntents};
+	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	shard.attach_logger([](const Log &log) {
 		fmt::println("{}", log.message);
@@ -81,9 +82,12 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev,
 									 InteractionResponseBuilder()
 										 .type(InteractionResponseType::
 												   ChannelMessageWithSource)
-										 .content(fmt::format(
-											 "{} **is** the best!",
-											 SELECT_OPTIONS.at(data.values[0])))
+										 .embeds({EmbedBuilder()
+													  .set_title(fmt::format(
+														  "{} **is** the best!",
+														  SELECT_OPTIONS.at(
+															  data.values[0])))
+													  .build()})
 										 .flags(MessageFlags::Ephemeral)
 										 .build();
 
