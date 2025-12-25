@@ -47,13 +47,13 @@ struct FunctionView<Ret(Params...)> {
 		: m_closure{reinterpret_cast<void *>(&callable)},
 		  m_proxy{[](void *closure, Params... params) {
 			  return (*reinterpret_cast<std::remove_reference_t<Callable> *>(
-				  closure))(static_cast<Params>(params)...);
+				  closure))(params...);
 		  }} {}
 
 	explicit operator bool() const { return m_proxy != nullptr; }
 
 	Ret operator()(Params... params) const {
-		return m_proxy(m_closure, static_cast<Params>(params)...);
+		return m_proxy(m_closure, params...);
 	}
 
    private:
