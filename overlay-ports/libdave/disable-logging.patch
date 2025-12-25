@@ -1,0 +1,24 @@
+diff --git a/cpp/src/dave/logger.h b/cpp/src/dave/logger.h
+index 318ac01..d81d3e4 100644
+--- a/cpp/src/dave/logger.h
++++ b/cpp/src/dave/logger.h
+@@ -4,7 +4,7 @@
+ #include <vector>
+ 
+ #if !defined(DISCORD_LOG)
+-#define DISCORD_LOG_FILE_LINE(sev, file, line) ::discord::dave::LogStreamer(sev, file, line)
++#define DISCORD_LOG_FILE_LINE(sev, file, line) if (false) ::discord::dave::NullLogStream()
+ #define DISCORD_LOG(sev) DISCORD_LOG_FILE_LINE(::discord::dave::sev, __FILE__, __LINE__)
+ #endif
+ namespace discord {
+@@ -43,5 +43,10 @@ private:
+     std::ostringstream stream_;
+ };
+ 
++struct NullLogStream {
++    template<typename T>
++    NullLogStream& operator<<(const T&) { return *this; }
++};
++
+ } // namespace dave
+ } // namespace discord

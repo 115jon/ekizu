@@ -9,5 +9,10 @@
     "openssl",
     "vcpkg-cmake",
     "vcpkg-cmake-config"
-  ]
+  ],
+  "features": {
+    "disable-logging": {
+      "description": "Disable all logging for zero runtime overhead"
+    }
+  }
 }

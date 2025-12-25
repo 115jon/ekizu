@@ -13,7 +13,10 @@
     "boost-outcome",
     "boost-url",
     "fmt",
-    "libdave",
+    {
+      "name": "libdave",
+      "features": ["disable-logging"]
+    },
     "libsodium",
     "nlohmann-json",
     "openssl",
