@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: sudo apt update && sudo apt install -y cmake ${{ matrix.gcc-version }} libssl-dev ninja-build rpm zlib1g-dev libtool autoconf linux-libc-dev
@@ -106,6 +108,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v1.1
@@ -150,6 +154,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Get Next Version
         id: semver
