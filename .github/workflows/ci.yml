@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install dependencies
         run: sudo apt update && sudo apt install -y cmake ${{ matrix.gcc-version }} libssl-dev ninja-build rpm zlib1g-dev libtool autoconf linux-libc-dev
@@ -76,13 +76,13 @@ jobs:
           mv build/*.rpm build/${{ env.OUTPUT_NAME }}.rpm
 
       - name: Upload Binary (DEB)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}.deb
           path: build/*.deb
 
       - name: Upload Binary (RPM)
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}.rpm
           path: build/*.rpm
@@ -105,7 +105,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v1.1
@@ -137,7 +137,7 @@ jobs:
         run: mv build/*.zip build/${{ env.OUTPUT_NAME }}
 
       - name: Upload Package
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}
           path: build/${{ env.OUTPUT_NAME }}
@@ -149,7 +149,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Get Next Version
         id: semver
@@ -200,7 +200,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: .
 
