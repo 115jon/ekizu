@@ -14,6 +14,11 @@ namespace ekizu {
  */
 struct Snowflake {
 	bool operator==(Snowflake other) const { return id == other.id; }
+	bool operator!=(Snowflake other) const { return id != other.id; }
+	bool operator<(Snowflake other) const { return id < other.id; }
+	bool operator<=(Snowflake other) const { return id <= other.id; }
+	bool operator>(Snowflake other) const { return id > other.id; }
+	bool operator>=(Snowflake other) const { return id >= other.id; }
 
 	/**
 	 * @brief Returns the timestamp of the Snowflake.
