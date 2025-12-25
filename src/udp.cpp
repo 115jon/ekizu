@@ -80,7 +80,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 	Result<> close() {
 		std::deque<PendingOp> pending;
 		{
-			std::lock_guard<std::mutex> lk(m_m);
+			std::scoped_lock lk(m_m);
 			if (m_closing) { return outcome::success(); }
 			m_closing = true;
 			pending.swap(m_recvq);
@@ -140,7 +140,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 						}
 
 						{
-							std::lock_guard<std::mutex> lk(self->impl->m_m);
+							std::scoped_lock lk(self->impl->m_m);
 							if (self->impl->m_closing) {
 								self->finish(operation_canceled_ec());
 								return;
@@ -152,8 +152,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 							ep, [self = std::move(self)](
 									boost::system::error_code ec2) mutable {
 								if (!ec2) {
-									std::lock_guard<std::mutex> lk(
-										self->impl->m_m);
+									std::scoped_lock lk(self->impl->m_m);
 									self->impl->m_connected = true;
 								}
 								self->finish(ec2);
@@ -185,7 +184,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 		CompletionExecutor handler_ex) {
 		bool connected = false;
 		{
-			std::lock_guard<std::mutex> lk(m_m);
+			std::scoped_lock lk(m_m);
 			connected = m_connected;
 		}
 		if (!connected) {
@@ -354,7 +353,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 		bool connected = false;
 		bool need_start = false;
 		{
-			std::lock_guard<std::mutex> lk(m_m);
+			std::scoped_lock lk(m_m);
 			if (m_closing) {
 				asio::post(
 					m_ex, asio::bind_executor(
@@ -390,7 +389,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 							CompletionExecutor handler_ex) {
 		bool need_start = false;
 		{
-			std::lock_guard<std::mutex> lk(m_m);
+			std::scoped_lock lk(m_m);
 			if (m_closing) {
 				asio::post(
 					m_ex, asio::bind_executor(
@@ -413,7 +412,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 	void start_receive() {
 		PendingOp op;
 		{
-			std::lock_guard<std::mutex> lk(m_m);
+			std::scoped_lock lk(m_m);
 			if (m_closing) {
 				m_receive_inflight = false;
 				return;
@@ -438,7 +437,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 
 				bool closing = false;
 				{
-					std::lock_guard<std::mutex> lk(self->m_m);
+					std::scoped_lock lk(self->m_m);
 					closing = self->m_closing;
 				}
 				if (ec && closing) { ec = operation_canceled_ec(); }
@@ -478,7 +477,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 
 				bool start_next = false;
 				{
-					std::lock_guard<std::mutex> lk(self->m_m);
+					std::scoped_lock lk(self->m_m);
 					start_next = !self->m_closing && !self->m_recvq.empty();
 					if (!start_next) { self->m_receive_inflight = false; }
 				}

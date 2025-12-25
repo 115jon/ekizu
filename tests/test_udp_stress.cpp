@@ -253,7 +253,7 @@ TEST_CASE("UdpSocket concurrent receive and close completes safely", "[udp]") {
 
 			std::promise<ekizu::Result<std::string>> p;
 			{
-				std::lock_guard lk(promises_mutex);
+				std::scoped_lock lk(promises_mutex);
 				fs.push_back(p.get_future());
 				promises.push_back(std::move(p));
 			}
@@ -263,7 +263,7 @@ TEST_CASE("UdpSocket concurrent receive and close completes safely", "[udp]") {
 			client.receive(asio::bind_executor(
 				io.cb.get_executor(),
 				[&promises, &promises_mutex, idx](auto r) mutable {
-					std::lock_guard lk(promises_mutex);
+					std::scoped_lock lk(promises_mutex);
 					promises[idx].set_value(std::move(r));
 				}));
 		}

@@ -23,7 +23,7 @@ struct CvWaiter {
 
 	void set(T v) {
 		{
-			std::lock_guard<std::mutex> lk(m);
+			std::scoped_lock lk(m);
 			value.emplace(std::move(v));
 			done = true;
 		}

@@ -34,7 +34,7 @@ void RateLimiter::maybe_wait_then_send(Pending p) {
 	bool should_wait = false;
 
 	{
-		std::lock_guard lk{m_mtx};
+		std::scoped_lock lk{m_mtx};
 		auto &rate_limits = m_rate_limits[p.req.inner.method()];
 		auto it = rate_limits.find(std::string(p.req.inner.target()));
 		if (it != rate_limits.end()) {
@@ -84,7 +84,7 @@ void RateLimiter::do_send(Pending p) {
 			m_strand,
 			[this, p = std::move(p)](Result<net::HttpResponse> res) mutable {
 				if (res) {
-					std::lock_guard lk{m_mtx};
+					std::scoped_lock lk{m_mtx};
 					auto &rate_limits = m_rate_limits[p.req.inner.method()];
 					const auto &headers = res.value().base();
 

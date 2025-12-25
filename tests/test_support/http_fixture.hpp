@@ -60,12 +60,12 @@ struct HttpServer : std::enable_shared_from_this<HttpServer> {
 	}
 
 	void clear_seen() {
-		std::lock_guard<std::mutex> lk(seen_mtx_);
+		std::scoped_lock lk(seen_mtx_);
 		seen_targets_.clear();
 	}
 
 	std::vector<std::string> seen_targets() const {
-		std::lock_guard<std::mutex> lk(seen_mtx_);
+		std::scoped_lock lk(seen_mtx_);
 		return seen_targets_;
 	}
 
@@ -78,7 +78,7 @@ struct HttpServer : std::enable_shared_from_this<HttpServer> {
    private:
 	void record_seen(std::string target) {
 		{
-			std::lock_guard<std::mutex> lk(seen_mtx_);
+			std::scoped_lock lk(seen_mtx_);
 			seen_targets_.push_back(std::move(target));
 		}
 		seen_cv_.notify_all();
