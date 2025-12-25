@@ -1,12 +1,46 @@
 #include <boost/asio/bind_executor.hpp>
-#include <boost/asio/dispatch.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <ekizu/rate_limiter.hpp>
 
 namespace ekizu {
 
-RateLimiter::RateLimiter(boost::asio::any_io_executor executor, SendFn send_fn)
+RateLimiter::RateLimiter(const boost::asio::any_io_executor &executor,
+						 SendFn send_fn)
 	: m_strand{executor}, m_send_fn{std::move(send_fn)} {}
+
+void RateLimiter::shutdown() {
+	boost::asio::dispatch(m_strand, [this] {
+		const bool was = m_stopping.exchange(true, std::memory_order_relaxed);
+		if (was) { return; }
+
+		// Prevent any further sends.
+		m_send_fn = {};
+
+		// Cancel any pending rate-limit wait.
+		if (m_wait_timer) { m_wait_timer->cancel(); }
+
+		// Fail any "waiting" request.
+		if (m_waiting) {
+			auto p = std::move(*m_waiting);
+			m_waiting.reset();
+			finish_one(
+				std::move(p),
+				make_error_code(boost::system::errc::operation_canceled));
+		}
+
+		// Fail queued requests immediately.
+		while (!m_queue.empty()) {
+			auto p = std::move(m_queue.front());
+			m_queue.pop_front();
+			finish_one(
+				std::move(p),
+				make_error_code(boost::system::errc::operation_canceled));
+		}
+
+		// If something was considered "busy", allow start_next() to stop
+		// cleanly.
+		m_busy = false;
+	});
+}
 
 void RateLimiter::async_send_impl(
 	DiscordApiRequest req, boost::asio::any_io_executor handler_ex,
@@ -14,22 +48,41 @@ void RateLimiter::async_send_impl(
 		handler) {
 	boost::asio::dispatch(m_strand, [this, req = std::move(req), handler_ex,
 									 h = std::move(handler)]() mutable {
+		if (m_stopping.load(std::memory_order_relaxed)) {
+			// Complete immediately on the handler's associated executor.
+			boost::asio::post(handler_ex, [h = std::move(h)]() mutable {
+				std::move(h)(
+					make_error_code(boost::system::errc::operation_canceled));
+			});
+			return;
+		}
+
 		m_queue.push_back(Pending{std::move(req), handler_ex, std::move(h)});
 		start_next();
 	});
 }
 
 void RateLimiter::start_next() {
-	if (m_busy || m_queue.empty()) { return; }
-	m_busy = true;
+	if (m_stopping.load(std::memory_order_relaxed)) {
+		m_busy = false;
+		return;
+	}
 
+	if (m_busy || m_queue.empty()) { return; }
+
+	m_busy = true;
 	auto p = std::move(m_queue.front());
 	m_queue.pop_front();
-
 	maybe_wait_then_send(std::move(p));
 }
 
 void RateLimiter::maybe_wait_then_send(Pending p) {
+	if (m_stopping.load(std::memory_order_relaxed)) {
+		finish_one(std::move(p),
+				   make_error_code(boost::system::errc::operation_canceled));
+		return;
+	}
+
 	std::chrono::system_clock::time_point reset_time;
 	bool should_wait = false;
 
@@ -52,23 +105,52 @@ void RateLimiter::maybe_wait_then_send(Pending p) {
 		return;
 	}
 
-	auto timer = std::make_shared<
-		boost::asio::basic_waitable_timer<std::chrono::system_clock>>(
-		m_strand.get_inner_executor());
-	timer->expires_at(reset_time);
+	// Store as the single "waiting" request (this RateLimiter is serialized by
+	// m_strand).
+	m_waiting.emplace(std::move(p));
+	if (!m_wait_timer) {
+		m_wait_timer = std::make_shared<
+			boost::asio::basic_waitable_timer<std::chrono::system_clock>>(
+			m_strand.get_inner_executor());
+	}
 
-	timer->async_wait(boost::asio::bind_executor(
-		m_strand, [this, p = std::move(p),
-				   timer](const boost::system::error_code &ec) mutable {
-			if (ec) {
-				finish_one(std::move(p), ec);
+	m_wait_timer->expires_at(reset_time);
+	m_wait_timer->async_wait(boost::asio::bind_executor(
+		m_strand, [this](const boost::system::error_code &ec) mutable {
+			if (!m_waiting) {
+				// Spurious: nothing waiting anymore.
+				m_busy = false;
+				start_next();
 				return;
 			}
-			do_send(std::move(p));
+
+			auto p2 = std::move(*m_waiting);
+			m_waiting.reset();
+
+			if (m_stopping.load(std::memory_order_relaxed)) {
+				finish_one(
+					std::move(p2),
+					make_error_code(boost::system::errc::operation_canceled));
+				return;
+			}
+
+			if (ec) {
+				// Includes operation_aborted from timer cancel.
+				finish_one(std::move(p2), ec);
+				return;
+			}
+
+			do_send(std::move(p2));
 		}));
 }
 
 void RateLimiter::do_send(Pending p) {
+	if (m_stopping.load(std::memory_order_relaxed)) {
+		finish_one(std::move(p),
+				   make_error_code(boost::system::errc::operation_canceled));
+		return;
+	}
+
 	if (!m_send_fn) {
 		finish_one(std::move(p), boost::system::errc::operation_not_permitted);
 		return;
@@ -85,6 +167,7 @@ void RateLimiter::do_send(Pending p) {
 			[this, p = std::move(p)](Result<net::HttpResponse> res) mutable {
 				if (res) {
 					std::scoped_lock lk{m_mtx};
+
 					auto &rate_limits = m_rate_limits[p.req.inner.method()];
 					const auto &headers = res.value().base();
 
@@ -123,15 +206,13 @@ void RateLimiter::do_send(Pending p) {
 }
 
 void RateLimiter::finish_one(Pending p, Result<net::HttpResponse> result) {
-	// IMPORTANT: p.handler is already the original completion handler; just
-	// invoke it. We hop to its associated executor using bind_executor captured
-	// at initiation time.
+	// Hop to the handler's associated executor.
 	boost::asio::post(p.handler_ex, [h = std::move(p.handler),
 									 result = std::move(result)]() mutable {
 		std::move(h)(std::move(result));
 	});
 
-	boost::asio::dispatch(m_strand, [this]() {
+	boost::asio::dispatch(m_strand, [this] {
 		m_busy = false;
 		start_next();
 	});

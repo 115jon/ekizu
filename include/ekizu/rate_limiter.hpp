@@ -3,8 +3,7 @@
 
 #include <boost/asio/any_completion_handler.hpp>
 #include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/associated_executor.hpp>
-#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/basic_waitable_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <chrono>
 #include <deque>
@@ -15,6 +14,7 @@
 #include <unordered_map>
 
 namespace ekizu {
+
 /**
  * @brief Represents a Discord API request.
  */
@@ -34,8 +34,10 @@ struct RateLimiter {
 		net::HttpRequest,
 		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>)>;
 
-	EKIZU_EXPORT explicit RateLimiter(boost::asio::any_io_executor executor,
-									  SendFn send_fn);
+	EKIZU_EXPORT explicit RateLimiter(
+		const boost::asio::any_io_executor &executor, SendFn send_fn);
+
+	EKIZU_EXPORT void shutdown();
 
 	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<net::HttpResponse>))
 				  CompletionToken>
@@ -45,7 +47,6 @@ struct RateLimiter {
 			[this, req = std::move(req)](auto &&handler) mutable {
 				auto handler_ex = boost::asio::get_associated_executor(
 					handler, m_strand.get_inner_executor());
-
 				async_send_impl(std::move(req), handler_ex,
 								boost::asio::any_completion_handler<void(
 									Result<net::HttpResponse>)>{
@@ -80,6 +81,7 @@ struct RateLimiter {
 
 	boost::asio::strand<boost::asio::any_io_executor> m_strand;
 	SendFn m_send_fn;
+	std::atomic_bool m_stopping{false};
 
 	std::mutex m_mtx;
 	std::unordered_map<net::HttpMethod,
@@ -88,7 +90,12 @@ struct RateLimiter {
 
 	bool m_busy{false};
 	std::deque<Pending> m_queue;
+	std::shared_ptr<
+		boost::asio::basic_waitable_timer<std::chrono::system_clock>>
+		m_wait_timer;
+	std::optional<Pending> m_waiting;
 };
+
 }  // namespace ekizu
 
 #endif	// EKIZU_RATE_LIMITER_HPP
