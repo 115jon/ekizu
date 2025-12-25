@@ -26,7 +26,7 @@ VoiceStates voice_states{10};
 std::unordered_map<Snowflake, VoiceConnectionConfig> voice_configs{10};
 ekizu::SnowflakeLruCache<VoiceConnection> voice_conns{10};
 
-Result<> handle_event(const Event &ev, const HttpClient &http, Shard &shard,
+Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 					  const asio::yield_context &yield);
 Result<> start_voice_connection(const VoiceConnectionConfig &voice_conn_config,
 								const asio::yield_context &yield, Shard &shard);
@@ -105,7 +105,7 @@ async_main(const asio::yield_context &yield) {
 	return outcome::success();
 }
 
-Result<> handle_event(const Event &ev, const HttpClient &http, Shard &shard,
+Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 					  const asio::yield_context &yield) {
 	if (!channel) { channel.emplace(yield.get_executor()); }
 

@@ -13,10 +13,10 @@ void to_json(nlohmann::json &j, const AddGuildMemberFields &m) {
 }
 
 AddGuildMember::AddGuildMember(RequestSender sender, Snowflake guild_id,
-							   Snowflake user_id, std::string_view access_token)
+							   Snowflake user_id, std::string access_token)
 	: m_guild_id{guild_id},
 	  m_user_id{user_id},
-	  m_fields{std::string{access_token}},
+	  m_fields{std::move(access_token)},
 	  m_sender{sender} {}
 
 AddGuildMember::operator net::HttpRequest() const {

@@ -18,7 +18,7 @@ EKIZU_EXPORT void to_json(nlohmann::json &j, const AddGuildMemberFields &m);
 
 struct AddGuildMember {
 	AddGuildMember(RequestSender sender, Snowflake guild_id, Snowflake user_id,
-				   std::string_view access_token);
+				   std::string access_token);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 

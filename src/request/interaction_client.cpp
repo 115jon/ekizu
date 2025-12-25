@@ -6,13 +6,14 @@ InteractionClient::InteractionClient(RequestSender sender,
 	: m_application_id{application_id}, m_sender{sender} {}
 
 CreateResponse InteractionClient::create_response(
-	Snowflake interaction_id, std::string_view interaction_token,
+	Snowflake interaction_id, std::string interaction_token,
 	InteractionResponse response) const {
-	return {m_sender, interaction_id, interaction_token, std::move(response)};
+	return {m_sender, interaction_id, std::move(interaction_token),
+			std::move(response)};
 }
 
 GetOriginalResponse InteractionClient::get_original_response(
-	Snowflake application_id, std::string_view interaction_token) const {
-	return {m_sender, m_application_id, interaction_token};
+	Snowflake application_id, std::string interaction_token) const {
+	return {m_sender, m_application_id, std::move(interaction_token)};
 }
 }  // namespace ekizu

@@ -78,17 +78,17 @@ EKIZU_EXPORT void from_json(const nlohmann::json &j, SelectOptions &o);
 struct SelectOptionsBuilder {
 	[[nodiscard]] SelectOptions build() const { return m_options; }
 
-	SelectOptionsBuilder &label(std::string_view label) {
-		m_options.label = label;
+	SelectOptionsBuilder &label(std::string label) {
+		m_options.label = std::move(label);
 		return *this;
 	}
 
-	SelectOptionsBuilder &value(std::string_view value) {
-		m_options.value = value;
+	SelectOptionsBuilder &value(std::string value) {
+		m_options.value = std::move(value);
 		return *this;
 	}
 
-	SelectOptionsBuilder &description(std::string_view description) {
+	SelectOptionsBuilder &description(std::string description) {
 		m_options.description = description;
 		return *this;
 	}
@@ -129,8 +129,8 @@ EKIZU_EXPORT void from_json(const nlohmann::json &j, SelectMenu &s);
 struct SelectMenuBuilder {
 	[[nodiscard]] SelectMenu build() const { return m_select_menu; }
 
-	SelectMenuBuilder &custom_id(std::string_view custom_id) {
-		m_select_menu.custom_id = custom_id;
+	SelectMenuBuilder &custom_id(std::string custom_id) {
+		m_select_menu.custom_id = std::move(custom_id);
 		return *this;
 	}
 
@@ -139,8 +139,8 @@ struct SelectMenuBuilder {
 		return *this;
 	}
 
-	SelectMenuBuilder &placeholder(std::string_view placeholder) {
-		m_select_menu.placeholder = placeholder;
+	SelectMenuBuilder &placeholder(std::string placeholder) {
+		m_select_menu.placeholder = std::move(placeholder);
 		return *this;
 	}
 

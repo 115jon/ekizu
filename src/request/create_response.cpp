@@ -35,11 +35,11 @@ void from_json(const nlohmann::json &j, InteractionResponse &r) {
 }
 
 CreateResponse::CreateResponse(RequestSender sender, Snowflake interaction_id,
-							   std::string_view interaction_token,
+							   std::string interaction_token,
 							   InteractionResponse response)
 	: m_sender{sender},
 	  m_interaction_id{interaction_id},
-	  m_interaction_token{interaction_token},
+	  m_interaction_token{std::move(interaction_token)},
 	  m_response{std::move(response)} {}
 
 CreateResponse::operator net::HttpRequest() const {

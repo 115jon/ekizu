@@ -57,8 +57,8 @@ void to_json(nlohmann::json &j, const CreateGuildFields &f) {
 	serialize(j, "channels", f.channels);
 }
 
-CreateGuild::CreateGuild(RequestSender sender, std::string_view name)
-	: m_fields{std::string{name}}, m_sender{sender} {}
+CreateGuild::CreateGuild(RequestSender sender, std::string name)
+	: m_fields{std::move(name)}, m_sender{sender} {}
 
 CreateGuild::operator net::HttpRequest() const {
 	net::HttpRequest req{net::HttpMethod::post, "/guilds", 11,

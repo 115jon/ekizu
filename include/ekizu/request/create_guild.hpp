@@ -76,7 +76,7 @@ struct CreateGuildFields {
 EKIZU_EXPORT void to_json(nlohmann::json &j, const CreateGuildFields &f);
 
 struct CreateGuild {
-	explicit CreateGuild(RequestSender sender, std::string_view name);
+	explicit CreateGuild(RequestSender sender, std::string name);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 
@@ -107,8 +107,8 @@ struct CreateGuild {
 		return *this;
 	}
 
-	CreateGuild &icon(std::string_view icon) {
-		m_fields.icon = std::string{icon};
+	CreateGuild &icon(std::string icon) {
+		m_fields.icon = std::move(icon);
 		return *this;
 	}
 

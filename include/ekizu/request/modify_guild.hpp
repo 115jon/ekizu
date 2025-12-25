@@ -49,8 +49,8 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &banner(std::string_view banner) {
-		m_fields.banner = banner;
+	ModifyGuild &banner(std::string banner) {
+		m_fields.banner = std::move(banner);
 		return *this;
 	}
 
@@ -60,13 +60,13 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &description(std::string_view description) {
-		m_fields.description = description;
+	ModifyGuild &description(std::string description) {
+		m_fields.description = std::move(description);
 		return *this;
 	}
 
-	ModifyGuild &discovery_splash(std::string_view discovery_splash) {
-		m_fields.discovery_splash = discovery_splash;
+	ModifyGuild &discovery_splash(std::string discovery_splash) {
+		m_fields.discovery_splash = std::move(discovery_splash);
 		return *this;
 	}
 
@@ -81,13 +81,13 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &icon(std::string_view icon) {
-		m_fields.icon = icon;
+	ModifyGuild &icon(std::string icon) {
+		m_fields.icon = std::move(icon);
 		return *this;
 	}
 
-	ModifyGuild &name(std::string_view name) {
-		m_fields.name = name;
+	ModifyGuild &name(std::string name) {
+		m_fields.name = std::move(name);
 		return *this;
 	}
 
@@ -96,8 +96,8 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &preferred_locale(std::string_view preferred_locale) {
-		m_fields.preferred_locale = preferred_locale;
+	ModifyGuild &preferred_locale(std::string preferred_locale) {
+		m_fields.preferred_locale = std::move(preferred_locale);
 		return *this;
 	}
 
@@ -113,8 +113,8 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &region(std::string_view region) {
-		m_fields.region = region;
+	ModifyGuild &region(std::string region) {
+		m_fields.region = std::move(region);
 		return *this;
 	}
 
@@ -128,8 +128,8 @@ struct ModifyGuild {
 		return *this;
 	}
 
-	ModifyGuild &splash(std::string_view splash) {
-		m_fields.splash = splash;
+	ModifyGuild &splash(std::string splash) {
+		m_fields.splash = std::move(splash);
 		return *this;
 	}
 

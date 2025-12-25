@@ -57,7 +57,7 @@
 namespace ekizu {
 struct HttpClient {
 	EKIZU_EXPORT explicit HttpClient(
-		const boost::asio::any_io_executor &executor, std::string_view token);
+		const boost::asio::any_io_executor &executor, std::string token);
 
 	[[nodiscard]] asio::any_io_executor get_executor() const {
 		return m_strand.get_inner_executor();
@@ -118,7 +118,7 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT UnpinMessage unpin_message(Snowflake channel_id,
 														  Snowflake message_id);
 
-	[[nodiscard]] EKIZU_EXPORT CreateGuild create_guild(std::string_view name);
+	[[nodiscard]] EKIZU_EXPORT CreateGuild create_guild(std::string name);
 	[[nodiscard]] EKIZU_EXPORT GetGuild get_guild(Snowflake guild_id);
 	[[nodiscard]] EKIZU_EXPORT GetGuildPreview
 	get_guild_preview(Snowflake guild_id);
@@ -127,7 +127,7 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT GetGuildChannels
 	get_guild_channels(Snowflake guild_id);
 	[[nodiscard]] EKIZU_EXPORT CreateGuildChannel
-	create_guild_channel(Snowflake guild_id, std::string_view name);
+	create_guild_channel(Snowflake guild_id, std::string name);
 	[[nodiscard]] EKIZU_EXPORT ModifyGuildChannelPositions
 	modify_guild_channel_positions(
 		Snowflake guild_id, std::vector<ModifyGuildChannelPosition> channels);
@@ -140,7 +140,7 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT SearchGuildMembers
 	search_guild_members(Snowflake guild_id);
 	[[nodiscard]] EKIZU_EXPORT AddGuildMember add_guild_member(
-		Snowflake guild_id, Snowflake user_id, std::string_view access_token);
+		Snowflake guild_id, Snowflake user_id, std::string access_token);
 	[[nodiscard]] EKIZU_EXPORT ModifyGuildMember
 	modify_guild_member(Snowflake guild_id, Snowflake user_id);
 	[[nodiscard]] EKIZU_EXPORT ModifyCurrentMember

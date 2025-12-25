@@ -52,9 +52,9 @@ struct CreateMessage {
 		return *this;
 	}
 
-	CreateMessage &content(std::string_view content) {
+	CreateMessage &content(std::string content) {
 		// TODO: Validate content
-		m_fields.content = content;
+		m_fields.content = std::move(content);
 		return *this;
 	}
 
@@ -74,8 +74,8 @@ struct CreateMessage {
 		return *this;
 	}
 
-	CreateMessage &payload_json(std::string_view payload_json) {
-		m_fields.payload_json = payload_json;
+	CreateMessage &payload_json(std::string payload_json) {
+		m_fields.payload_json = std::move(payload_json);
 		return *this;
 	}
 

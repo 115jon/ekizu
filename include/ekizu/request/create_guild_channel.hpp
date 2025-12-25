@@ -72,7 +72,7 @@ struct CreateGuildChannel {
 	 * @param guild_id The ID of the guild.
 	 */
 	CreateGuildChannel(RequestSender sender, Snowflake guild_id,
-					   std::string_view name);
+					   std::string name);
 
 	/**
 	 * @brief Converts the request to an HTTP request.

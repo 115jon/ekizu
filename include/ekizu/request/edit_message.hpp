@@ -39,9 +39,9 @@ struct EditMessage {
 		return *this;
 	}
 
-	EditMessage &content(std::string_view content) {
+	EditMessage &content(std::string content) {
 		// TODO: Validate content
-		m_fields.content = content;
+		m_fields.content = std::move(content);
 		return *this;
 	}
 
@@ -62,8 +62,8 @@ struct EditMessage {
 		return *this;
 	}
 
-	EditMessage &payload_json(std::string_view payload_json) {
-		m_fields.payload_json = payload_json;
+	EditMessage &payload_json(std::string payload_json) {
+		m_fields.payload_json = std::move(payload_json);
 		return *this;
 	}
 

@@ -52,8 +52,8 @@ void from_json(const nlohmann::json &j, CreateGuildChannelFields &f) {
 }
 
 CreateGuildChannel::CreateGuildChannel(RequestSender sender, Snowflake guild_id,
-									   std::string_view name)
-	: m_guild_id{guild_id}, m_fields{std::string{name}}, m_sender{sender} {}
+									   std::string name)
+	: m_guild_id{guild_id}, m_fields{std::move(name)}, m_sender{sender} {}
 
 CreateGuildChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{

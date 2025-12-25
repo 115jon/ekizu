@@ -4,7 +4,7 @@
 
 using namespace ekizu;
 
-Result<> handle_event(const Event &ev, const HttpClient &http,
+Result<> handle_event(const Event &ev, HttpClient &http,
 					  const asio::yield_context &yield);
 
 async_main(const asio::yield_context &yield) {
@@ -36,7 +36,7 @@ async_main(const asio::yield_context &yield) {
 	return outcome::success();
 }
 
-Result<> handle_event(const Event &ev, const HttpClient &http,
+Result<> handle_event(const Event &ev, HttpClient &http,
 					  const asio::yield_context &yield) {
 	return std::visit(
 		[&](auto &&event) -> Result<> {

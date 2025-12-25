@@ -16,8 +16,8 @@ struct overload : Func... {
 template <typename... Func>
 overload(Func...) -> overload<Func...>;
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http, const asio::yield_context &yield);
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
+					  const asio::yield_context &yield);
 
 async_main(const asio::yield_context &yield) {
 	std::string token{std::getenv("DISCORD_TOKEN")};
@@ -55,8 +55,7 @@ const std::unordered_map<std::string_view, std::string_view> SELECT_OPTIONS{
 	{"kotlin", "Kotlin"}, {"java", "Java"},		{"go", "Go"},
 };
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http,
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 					  const asio::yield_context &yield) {
 	std::visit(
 		overload{
@@ -110,8 +109,8 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev,
 				boost::copy(SELECT_OPTIONS |
 								boost::adaptors::transformed([](const auto &p) {
 									return SelectOptionsBuilder()
-										.label(p.second)
-										.value(p.first)
+										.label(std::string{p.second})
+										.value(std::string{p.first})
 										.build();
 								}),
 							std::back_inserter(options));

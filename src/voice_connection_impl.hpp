@@ -55,7 +55,7 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 	};
 
 	Impl(asio::any_io_executor executor, net::WebSocketClient ws,
-		 VoiceState state, std::string url, std::string_view token,
+		 VoiceState state, std::string url, std::string token,
 		 std::unique_ptr<Codec> codec);
 
 	asio::any_io_executor get_executor() const { return m_strand; }

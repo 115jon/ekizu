@@ -52,9 +52,9 @@ struct InteractionResponseBuilder {
 		return *this;
 	}
 
-	InteractionResponseBuilder &content(std::string_view content) {
+	InteractionResponseBuilder &content(std::string content) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->content = content;
+		m_response.data->content = std::move(content);
 		return *this;
 	}
 
@@ -97,8 +97,7 @@ struct InteractionResponseBuilder {
 
 struct CreateResponse {
 	CreateResponse(RequestSender sender, Snowflake interaction_id,
-				   std::string_view interaction_token,
-				   InteractionResponse response);
+				   std::string interaction_token, InteractionResponse response);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 

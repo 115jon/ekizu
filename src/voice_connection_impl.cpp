@@ -33,12 +33,12 @@ namespace ekizu {
 
 VoiceConnection::Impl::Impl(
 	asio::any_io_executor executor, net::WebSocketClient ws, VoiceState state,
-	std::string url, std::string_view token, std::unique_ptr<Codec> codec)
+	std::string url, std::string token, std::unique_ptr<Codec> codec)
 	: m_strand(executor),
 	  m_ws(std::move(ws)),
 	  m_state(std::move(state)),
 	  m_url(std::move(url)),
-	  m_token(token),
+	  m_token(std::move(token)),
 	  m_codec(std::move(codec)),
 	  m_dave_manager(
 		  std::make_shared<DaveManager>(fmt::to_string(m_state.user_id))) {}
