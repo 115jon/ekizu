@@ -12,12 +12,11 @@
 #define EKIZU_TRYV BOOST_OUTCOME_TRYV
 
 namespace ekizu {
+namespace outcome = BOOST_OUTCOME_V2_NAMESPACE;
 template <typename T = boost::blank>
-using Result = boost::outcome_v2::result<T>;
-// using Result = boost::outcome_v2::result<T, boost::system::error_code,
-// 										 boost::outcome_v2::policy::terminate>;
-namespace outcome = boost::outcome_v2;
-
+using Result = outcome::result<T>;
+// using Result = outcome::result<T, boost::system::error_code,
+// 										 outcome::policy::terminate>;
 }  // namespace ekizu
 
 #endif	// EKIZU_RESULT_HPP
