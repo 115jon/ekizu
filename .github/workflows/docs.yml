@@ -21,7 +21,7 @@ permissions:
 jobs:
   documentation:
     name: Build documentation
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -37,16 +37,17 @@ jobs:
       - name: Set up build cache
         uses: actions/cache/restore@v3
         with:
-          key: ekizu-${{ hashfiles('.cache/**') }}
+          key: ekizu-${{ hashFiles('.cache/**') }}
           path: .cache
           restore-keys: |
             ekizu-
 
       - name: Install Doxide
         run: |
-          echo 'deb http://download.indii.org/deb jammy main' | sudo tee /etc/apt/sources.list.d/indii.org.list
+          echo 'deb http://download.indii.org/deb noble main' | sudo tee /etc/apt/sources.list.d/indii.org.list
           curl -fsSL https://download.indii.org/deb/Release.key | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/indii.org.gpg > /dev/null
-          sudo apt-get update && sudo apt-get install doxide
+          sudo apt-get update
+          sudo apt-get install -y doxide
 
       - name: Install Python dependencies
         run: pip install mkdocs mkdocs-material
@@ -66,15 +67,17 @@ jobs:
         working-directory: docs
 
       - name: Upload to GitHub Pages
+        if: ${{ !env.ACT }}
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs/site
 
       - name: Deploy to GitHub Pages
+        if: ${{ !env.ACT }}
         uses: actions/deploy-pages@v4
 
       - name: Save build cache
         uses: actions/cache/save@v3
         with:
-          key: ekizu-${{ hashfiles('.cache/**') }}
+          key: ekizu-${{ hashFiles('.cache/**') }}
           path: .cache
