@@ -60,8 +60,8 @@ struct EmbedBuilder {
 	 * @param description The description to set.
 	 * @return Embed& A reference to the Embed object.
 	 */
-	EmbedBuilder &set_description(const std::string &description) {
-		m_embed.description = description;
+	EmbedBuilder &set_description(std::string description) {
+		m_embed.description = std::move(description);
 		return *this;
 	}
 
@@ -126,8 +126,8 @@ struct EmbedBuilder {
 	 * @param title The title to set.
 	 * @return Embed& A reference to the Embed object.
 	 */
-	EmbedBuilder &set_title(const std::string &title) {
-		m_embed.title = title;
+	EmbedBuilder &set_title(std::string title) {
+		m_embed.title = std::move(title);
 		return *this;
 	}
 
@@ -137,8 +137,8 @@ struct EmbedBuilder {
 	 * @param url The URL to set.
 	 * @return Embed& A reference to the Embed object.
 	 */
-	EmbedBuilder &set_url(const std::string &url) {
-		m_embed.url = url;
+	EmbedBuilder &set_url(std::string url) {
+		m_embed.url = std::move(url);
 		return *this;
 	}
 

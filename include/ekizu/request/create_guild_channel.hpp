@@ -126,13 +126,13 @@ struct CreateGuildChannel {
 		return *this;
 	}
 
-	CreateGuildChannel &rtc_region(const std::string &region) {
-		m_fields.rtc_region = region;
+	CreateGuildChannel &rtc_region(std::string region) {
+		m_fields.rtc_region = std::move(region);
 		return *this;
 	}
 
-	CreateGuildChannel &topic(const std::string &topic) {
-		m_fields.topic = topic;
+	CreateGuildChannel &topic(std::string topic) {
+		m_fields.topic = std::move(topic);
 		return *this;
 	}
 
