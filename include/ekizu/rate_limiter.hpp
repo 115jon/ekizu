@@ -1,12 +1,17 @@
 #ifndef EKIZU_RATE_LIMITER_HPP
 #define EKIZU_RATE_LIMITER_HPP
 
-#include <ekizu/export.h>
-
-#include <boost/asio/spawn.hpp>
+#include <boost/asio/any_completion_handler.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/associated_executor.hpp>
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/strand.hpp>
+#include <chrono>
+#include <deque>
 #include <ekizu/http.hpp>
-#include <ekizu/util.hpp>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace ekizu {
@@ -25,30 +30,64 @@ struct DiscordApiRequest {
  * Discord API.
  */
 struct RateLimiter {
-	EKIZU_EXPORT explicit RateLimiter(
-		std::function<Result<net::HttpResponse>(net::HttpRequest,
-												const asio::yield_context &)>
-			send_fn);
+	using SendFn = std::function<void(
+		net::HttpRequest,
+		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>)>;
 
-	[[nodiscard]] Result<net::HttpResponse> send(
-		const DiscordApiRequest &req, const boost::asio::yield_context &yield);
+	EKIZU_EXPORT explicit RateLimiter(boost::asio::any_io_executor executor,
+									  SendFn send_fn);
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<net::HttpResponse>))
+				  CompletionToken>
+	auto send(DiscordApiRequest req, CompletionToken &&token) {
+		return boost::asio::async_initiate<CompletionToken,
+										   void(Result<net::HttpResponse>)>(
+			[this, req = std::move(req)](auto &&handler) mutable {
+				auto handler_ex = boost::asio::get_associated_executor(
+					handler, m_strand.get_inner_executor());
+
+				async_send_impl(std::move(req), handler_ex,
+								boost::asio::any_completion_handler<void(
+									Result<net::HttpResponse>)>{
+									std::forward<decltype(handler)>(handler)});
+			},
+			token);
+	}
 
    private:
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_send_fn;
-	bool m_rate_limited{};
-
 	struct RateLimit {
 		uint16_t limit{};
 		uint16_t remaining{};
 		std::chrono::system_clock::time_point reset_time;
 	};
 
+	struct Pending {
+		DiscordApiRequest req;
+		boost::asio::any_io_executor handler_ex;
+		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
+			handler;
+	};
+
+	EKIZU_EXPORT void async_send_impl(
+		DiscordApiRequest req, boost::asio::any_io_executor handler_ex,
+		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
+			handler);
+
+	void start_next();
+	void maybe_wait_then_send(Pending p);
+	void do_send(Pending p);
+	void finish_one(Pending p, Result<net::HttpResponse> result);
+
+	boost::asio::strand<boost::asio::any_io_executor> m_strand;
+	SendFn m_send_fn;
+
 	std::mutex m_mtx;
 	std::unordered_map<net::HttpMethod,
 					   std::unordered_map<std::string, RateLimit>>
 		m_rate_limits;
+
+	bool m_busy{false};
+	std::deque<Pending> m_queue;
 };
 }  // namespace ekizu
 

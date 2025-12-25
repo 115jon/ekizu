@@ -1,4 +1,3 @@
-#include <ekizu/json_util.hpp>
 #include <ekizu/request/interaction/create_response.hpp>
 
 namespace ekizu {
@@ -35,12 +34,10 @@ void from_json(const nlohmann::json &j, InteractionResponse &r) {
 	deserialize(j, "data", r.data);
 }
 
-CreateResponse::CreateResponse(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake interaction_id, std::string_view interaction_token,
-	InteractionResponse response)
-	: m_make_request{make_request},
+CreateResponse::CreateResponse(RequestSender sender, Snowflake interaction_id,
+							   std::string_view interaction_token,
+							   InteractionResponse response)
+	: m_sender{sender},
 	  m_interaction_id{interaction_id},
 	  m_interaction_token{interaction_token},
 	  m_response{std::move(response)} {}
@@ -55,19 +52,5 @@ CreateResponse::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<> CreateResponse::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	if (res.result() == net::HttpStatus::no_content) {
-		return outcome::success();
-	}
-
-	return boost::system::errc::operation_not_permitted;
 }
 }  // namespace ekizu

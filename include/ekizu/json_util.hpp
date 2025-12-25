@@ -10,7 +10,7 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include <ekizu/util.hpp>
+#include <ekizu/result.hpp>
 #include <optional>
 #include <type_traits>
 #include <variant>
@@ -58,7 +58,7 @@ constexpr bool HAS_TO_JSON_V = has_to_json<T>::value;
 
 template <typename... Types, std::size_t... I>
 std::optional<std::variant<Types...>> variant_from_json_impl(
-	const nlohmann::json &j, std::index_sequence<I...>) {
+	const nlohmann::json &j, std::index_sequence<I...> /*unused*/) {
 	std::variant<Types...> result;
 
 	// Helper function to attempt deserialization into a variant type. Why is

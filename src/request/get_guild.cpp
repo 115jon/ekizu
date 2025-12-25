@@ -2,11 +2,8 @@
 #include <ekizu/request/get_guild.hpp>
 
 namespace ekizu {
-GetGuild::GetGuild(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id)
-	: m_guild_id{guild_id}, m_make_request{make_request} {}
+GetGuild::GetGuild(RequestSender sender, Snowflake guild_id)
+	: m_guild_id{guild_id}, m_sender{sender} {}
 
 GetGuild::operator net::HttpRequest() const {
 	return net::HttpRequest{
@@ -16,15 +13,5 @@ GetGuild::operator net::HttpRequest() const {
 						? fmt::format("?with_counts={}", *m_fields.with_counts)
 						: ""),
 		11};
-}
-
-Result<Guild> GetGuild::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Guild>(res.body());
 }
 }  // namespace ekizu

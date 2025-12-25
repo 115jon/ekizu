@@ -3,6 +3,7 @@
 
 #include <ekizu/guild_member.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct AddGuildMemberFields {
@@ -16,12 +17,10 @@ struct AddGuildMemberFields {
 EKIZU_EXPORT void to_json(nlohmann::json &j, const AddGuildMemberFields &m);
 
 struct AddGuildMember {
-	AddGuildMember(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id, Snowflake user_id, std::string_view access_token);
+	AddGuildMember(RequestSender sender, Snowflake guild_id, Snowflake user_id,
+				   std::string_view access_token);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	AddGuildMember &nick(std::string nick) {
 		m_fields.nick = std::move(nick);
@@ -43,16 +42,22 @@ struct AddGuildMember {
 		return *this;
 	}
 
-	EKIZU_EXPORT Result<GuildMember> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<GuildMember>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<GuildMember>)>(
+			[this](auto &&handler) {
+				m_sender.send<GuildMember>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
 	Snowflake m_user_id;
 	AddGuildMemberFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

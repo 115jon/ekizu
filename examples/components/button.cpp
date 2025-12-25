@@ -19,7 +19,7 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev,
 async_main(const asio::yield_context &yield) {
 	std::string token{std::getenv("DISCORD_TOKEN")};
 	Snowflake bot_id;
-	HttpClient http{token};
+	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	shard.attach_logger([](const Log &log) {

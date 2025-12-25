@@ -3,6 +3,7 @@
 
 #include <ekizu/http.hpp>
 #include <ekizu/message.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct EditMessageFields {
@@ -28,12 +29,10 @@ EKIZU_EXPORT void to_json(nlohmann::json &j, const EditMessageFields &f);
 EKIZU_EXPORT void from_json(const nlohmann::json &j, EditMessageFields &f);
 
 struct EditMessage {
-	EditMessage(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake channel_id, Snowflake message_id);
+	EditMessage(RequestSender sender, Snowflake channel_id,
+				Snowflake message_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	EditMessage &allowed_mentions(AllowedMentions allowed_mentions) {
 		m_fields.allowed_mentions = allowed_mentions;
@@ -68,15 +67,22 @@ struct EditMessage {
 		return *this;
 	}
 
-	EKIZU_EXPORT Result<Message> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Message>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Message>)>(
+			[this](auto &&handler) {
+				m_sender.send<Message>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_channel_id;
 	Snowflake m_message_id;
 	EditMessageFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

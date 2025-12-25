@@ -57,11 +57,8 @@ void to_json(nlohmann::json &j, const CreateGuildFields &f) {
 	serialize(j, "channels", f.channels);
 }
 
-CreateGuild::CreateGuild(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	std::string_view name)
-	: m_fields{std::string{name}}, m_make_request{make_request} {}
+CreateGuild::CreateGuild(RequestSender sender, std::string_view name)
+	: m_fields{std::string{name}}, m_sender{sender} {}
 
 CreateGuild::operator net::HttpRequest() const {
 	net::HttpRequest req{net::HttpMethod::post, "/guilds", 11,
@@ -71,15 +68,5 @@ CreateGuild::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<Guild> CreateGuild::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Guild>(res.body());
 }
 }  // namespace ekizu

@@ -3,6 +3,7 @@
 
 #include <ekizu/channel.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 /**
@@ -11,33 +12,35 @@ namespace ekizu {
 struct GetGuildChannels {
 	/**
 	 * @brief Constructor for GetGuildChannels.
-	 * @param make_request The function to make the HTTP request.
+	 * @param sender The request sender.
 	 * @param guild_id The ID of the guild.
 	 */
-	GetGuildChannels(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	GetGuildChannels(RequestSender sender, Snowflake guild_id);
 
 	/**
 	 * @brief Converts the request to an HTTP request.
 	 * @return The HTTP request.
 	 */
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	/**
 	 * @brief Sends the API request to get guild channels.
-	 * @param yield The coroutine yield context.
-	 * @return Result containing the list of guild channels on success.
 	 */
-	EKIZU_EXPORT Result<std::vector<Channel>> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(
+		void(Result<std::vector<Channel>>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<std::vector<Channel>>)>(
+			[this](auto &&handler) {
+				m_sender.send<std::vector<Channel>>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

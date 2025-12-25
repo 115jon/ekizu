@@ -2,6 +2,7 @@
 #define EKIZU_REQUEST_GET_CURRENT_USER_HPP
 
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 #include <ekizu/user.hpp>
 
 namespace ekizu {
@@ -9,28 +10,33 @@ namespace ekizu {
  * @brief Represents the  REST API endpoint.
  */
 struct GetCurrentUser {
-	explicit GetCurrentUser(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request);
+	explicit GetCurrentUser(RequestSender sender);
 
 	/**
 	 * @brief Converts the GetCurrentUser to an HTTP request.
 	 *
 	 * @return The HTTP request.
 	 */
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	/**
 	 * @brief Sends the GetCurrentUser request.
 	 *
 	 * @return The result of the request as an HTTP response.
 	 */
-	EKIZU_EXPORT Result<User> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<User>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<User>)>(
+			[this](auto &&handler) {
+				m_sender.send<User>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

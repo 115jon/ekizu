@@ -4,6 +4,7 @@
 #include <ekizu/channel.hpp>
 #include <ekizu/guild.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct RoleFields {
@@ -75,12 +76,9 @@ struct CreateGuildFields {
 EKIZU_EXPORT void to_json(nlohmann::json &j, const CreateGuildFields &f);
 
 struct CreateGuild {
-	explicit CreateGuild(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		std::string_view name);
+	explicit CreateGuild(RequestSender sender, std::string_view name);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	CreateGuild &afk_channel_id(Snowflake afk_channel_id) {
 		m_fields.afk_channel_id = afk_channel_id;
@@ -124,14 +122,20 @@ struct CreateGuild {
 		return *this;
 	}
 
-	[[nodiscard]] EKIZU_EXPORT Result<Guild> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Guild>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Guild>)>(
+			[this](auto &&handler) {
+				m_sender.send<Guild>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	CreateGuildFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

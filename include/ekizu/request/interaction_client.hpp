@@ -3,13 +3,11 @@
 
 #include <ekizu/request/interaction/create_response.hpp>
 #include <ekizu/request/interaction/get_original_response.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct InteractionClient {
-	InteractionClient(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake application_id);
+	InteractionClient(RequestSender sender, Snowflake application_id);
 
 	/// https://discord.com/developers/docs/interactions/receiving-and-responding#endpoints
 
@@ -22,9 +20,7 @@ struct InteractionClient {
 
    private:
 	Snowflake m_application_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

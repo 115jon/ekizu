@@ -9,7 +9,7 @@ Result<> handle_event(const Event &ev, const HttpClient &http,
 
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
-	HttpClient http{token};
+	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	while (true) {

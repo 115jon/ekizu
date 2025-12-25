@@ -1,4 +1,4 @@
-#include <portaudio.h>	// for mic recording
+#include <portaudio.h>
 
 #include <boost/asio/experimental/concurrent_channel.hpp>
 #include <ekizu/async_main.hpp>
@@ -34,14 +34,11 @@ static constexpr uint8_t CHANNEL_COUNT = 2;		// required by Discord
 static constexpr uint32_t SAMPLE_RATE = 48000;	// required by Discord
 
 static constexpr uint16_t FRAME_COUNT = 960;
-// since we are sending int16_t samples.
-static constexpr uint8_t SAMPLE_SIZE = 2;
-static constexpr uint16_t FRAME_SIZE =
-	FRAME_COUNT * CHANNEL_COUNT * SAMPLE_SIZE;
+static constexpr uint16_t FRAME_SIZE = FRAME_COUNT * CHANNEL_COUNT;
 
 struct PortAudioData {
 	boost::asio::experimental::concurrent_channel<void(
-		boost::system::error_code, std::array<std::byte, FRAME_SIZE>)>
+		boost::system::error_code, std::array<int16_t, FRAME_SIZE>)>
 		done;
 };
 
@@ -51,12 +48,11 @@ static int pa_callback(
 	[[maybe_unused]] const PaStreamCallbackTimeInfo *time_info,
 	[[maybe_unused]] PaStreamCallbackFlags status_flags, void *user_data) {
 	auto &data = *static_cast<PortAudioData *>(user_data);
-	const auto *input = reinterpret_cast<const std::byte *>(in);
+	const auto *input = reinterpret_cast<const int16_t *>(in);
 
-	std::array<std::byte, FRAME_SIZE> buf{};
+	std::array<int16_t, FRAME_SIZE> buf{};
 	std::copy_n(input, buf.size(), buf.data());
 
-	// Notify our done channel that there's new data.
 	data.done.async_send(
 		boost::system::error_code{}, buf,
 		[]([[maybe_unused]] const boost::system::error_code &) {});
@@ -65,7 +61,7 @@ static int pa_callback(
 
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
-	HttpClient http{token};
+	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	shard.attach_logger([](const Log &log) {
@@ -81,7 +77,6 @@ async_main(const asio::yield_context &yield) {
 					"Failed to get next event: {}", res.error().message());
 				return res.error();
 			}
-			// Could be handling a non-dispatch event.
 			continue;
 		}
 
@@ -187,7 +182,8 @@ Result<> handle_event(const Event &ev, const HttpClient &http, Shard &shard,
 Result<> start_voice_connection(const VoiceConnectionConfig &voice_conn_config,
 								const asio::yield_context &yield) {
 	// Uses the config to create a voice connection.
-	EKIZU_TRY(auto conn, voice_conn_config.connect(yield));
+	EKIZU_TRY(
+		auto conn, voice_conn_config.connect(yield.get_executor(), yield));
 
 	conn.attach_logger([](auto log) { fmt::println("{}", log.message); });
 
@@ -236,11 +232,11 @@ Result<> start_voice_connection(const VoiceConnectionConfig &voice_conn_config,
 		auto buf = data.done.async_receive(yield);
 
 		asio::spawn(
-			yield,
-			[&conn, buf](auto y) { (void)conn.send_raw(boost::span{buf}, y); },
+			yield, [&conn, buf](auto y) { (void)conn.send_raw(buf, y); },
 			asio::detached);
 	}
 
+	EKIZU_TRY(conn.flush(yield));
 	// Tell it we are done speaking.
 	EKIZU_TRY(conn.speak(SpeakerFlag::None, yield));
 	Pa_CloseStream(stream);

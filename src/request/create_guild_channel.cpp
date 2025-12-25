@@ -51,13 +51,9 @@ void from_json(const nlohmann::json &j, CreateGuildChannelFields &f) {
 				f.default_thread_rate_limit_per_user);
 }
 
-CreateGuildChannel::CreateGuildChannel(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id, std::string_view name)
-	: m_guild_id{guild_id},
-	  m_fields{std::string{name}},
-	  m_make_request{make_request} {}
+CreateGuildChannel::CreateGuildChannel(RequestSender sender, Snowflake guild_id,
+									   std::string_view name)
+	: m_guild_id{guild_id}, m_fields{std::string{name}}, m_sender{sender} {}
 
 CreateGuildChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{
@@ -68,16 +64,5 @@ CreateGuildChannel::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<Channel> CreateGuildChannel::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Channel>(res.body());
 }
 }  // namespace ekizu

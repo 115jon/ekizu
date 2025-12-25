@@ -16,12 +16,10 @@ void from_json(const nlohmann::json &j, FollowedChannel &f) {
 }
 
 FollowAnnouncementChannel::FollowAnnouncementChannel(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake channel_id, Snowflake webhook_channel_id)
+	RequestSender sender, Snowflake channel_id, Snowflake webhook_channel_id)
 	: m_channel_id{channel_id},
 	  m_webhook_channel_id{webhook_channel_id},
-	  m_make_request{make_request} {}
+	  m_sender{sender} {}
 
 FollowAnnouncementChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{
@@ -33,20 +31,5 @@ FollowAnnouncementChannel::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<> FollowAnnouncementChannel::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	if (res.result() == net::HttpStatus::no_content) {
-		return outcome::success();
-	}
-
-	return boost::system::errc::operation_not_permitted;
 }
 }  // namespace ekizu

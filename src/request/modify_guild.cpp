@@ -57,11 +57,8 @@ void from_json(const nlohmann::json &j, ModifyGuildFields &f) {
 	deserialize(j, "safety_alerts_channel_id", f.safety_alerts_channel_id);
 }
 
-ModifyGuild::ModifyGuild(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id)
-	: m_guild_id{guild_id}, m_make_request{make_request} {}
+ModifyGuild::ModifyGuild(RequestSender sender, Snowflake guild_id)
+	: m_guild_id{guild_id}, m_sender{sender} {}
 
 ModifyGuild::operator net::HttpRequest() const {
 	// Create and return the HTTP request
@@ -73,15 +70,5 @@ ModifyGuild::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<Guild> ModifyGuild::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Guild>(res.body());
 }
 }  // namespace ekizu

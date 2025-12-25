@@ -3,24 +3,30 @@
 
 #include <ekizu/http.hpp>
 #include <ekizu/message.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct GetOriginalResponse {
-	GetOriginalResponse(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake application_id, std::string_view interaction_token);
+	GetOriginalResponse(RequestSender sender, Snowflake application_id,
+						std::string_view interaction_token);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	EKIZU_EXPORT Result<Message> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Message>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Message>)>(
+			[this](auto &&handler) {
+				m_sender.send<Message>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_application_id;
 	std::string m_interaction_token;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

@@ -56,10 +56,14 @@
 
 namespace ekizu {
 struct HttpClient {
-	EKIZU_EXPORT explicit HttpClient(std::string_view token);
+	EKIZU_EXPORT explicit HttpClient(asio::any_io_executor executor,
+									 std::string_view token);
 
-	// https://discord.com/developers/docs/resources/channel
+	[[nodiscard]] asio::any_io_executor get_executor() const {
+		return m_strand.get_inner_executor();
+	}
 
+	// (public request builders unchanged)
 	[[nodiscard]] EKIZU_EXPORT GetChannel
 	get_channel(Snowflake channel_id) const;
 	[[nodiscard]] EKIZU_EXPORT ModifyChannel
@@ -117,8 +121,6 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT UnpinMessage
 	unpin_message(Snowflake channel_id, Snowflake message_id) const;
 
-	// https://discord.com/developers/docs/resources/guild
-
 	[[nodiscard]] EKIZU_EXPORT CreateGuild
 	create_guild(std::string_view name) const;
 	[[nodiscard]] EKIZU_EXPORT GetGuild get_guild(Snowflake guild_id) const;
@@ -164,28 +166,29 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT GetGuildInvites
 	get_guild_invites(Snowflake guild_id) const;
 
-	// https://discord.com/developers/docs/resources/user
-
 	[[nodiscard]] EKIZU_EXPORT GetCurrentUser get_current_user() const;
 	[[nodiscard]] EKIZU_EXPORT GetUser get_user(Snowflake user_id) const;
 	[[nodiscard]] EKIZU_EXPORT ModifyCurrentUser modify_current_user() const;
 	[[nodiscard]] EKIZU_EXPORT CreateDM create_dm(Snowflake user_id) const;
-
 	[[nodiscard]] EKIZU_EXPORT InteractionClient
 	interaction(Snowflake application_id) const;
 
    private:
-	/// Function which sends an HTTP request. This is wrapped around a
-	/// ratelimiter and passed around to other structs which need the
-	/// functionality.
-	[[nodiscard]] Result<net::HttpResponse> send(
-		net::HttpRequest req, const asio::yield_context &yield);
+	// Low-level async send used by RateLimiter; completion handler will be
+	// invoked.
+	EKIZU_EXPORT void send_http(
+		net::HttpRequest req,
+		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
+			handler);
 
+	EKIZU_EXPORT void send_http_attempt(
+		net::HttpRequest req, int attempt,
+		boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
+			handler);
+
+	boost::asio::strand<boost::asio::any_io_executor> m_strand;
 	std::optional<net::HttpConnection> m_http;
 	RateLimiter m_rate_limiter;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_rate_limiter_make_request;
 	std::optional<std::string> m_token;
 };
 }  // namespace ekizu

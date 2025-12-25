@@ -1,0 +1,25 @@
+{
+  "description": "A Discord library for C++",
+  "homepage": "https://github.com/115jon/ekizu",
+  "license": "MIT",
+  "name": "ekizu",
+  "version": "0.1.0",
+  "dependencies": [
+    "boost-asio",
+    "boost-beast",
+    "boost-charconv",
+    "boost-coroutine2",
+    "boost-filesystem",
+    "boost-outcome",
+    "boost-url",
+    "fmt",
+    "libdave",
+    "libsodium",
+    "nlohmann-json",
+    "openssl",
+    "opus",
+    "portaudio",
+    "spdlog",
+    "zlib"
+  ]
+}

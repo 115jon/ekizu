@@ -40,4 +40,21 @@ void from_json(const nlohmann::json &j, PartialEmoji &p) {
 	deserialize(j, "name", p.name);
 	deserialize(j, "animated", p.animated);
 }
+
+EmojiBuilder &EmojiBuilder::id(Snowflake id) {
+	m_emoji.id = id;
+	return *this;
+}
+
+EmojiBuilder &EmojiBuilder::name(std::string name) {
+	m_emoji.name = std::move(name);
+	return *this;
+}
+
+EmojiBuilder &EmojiBuilder::animated(bool animated) {
+	m_emoji.animated = animated;
+	return *this;
+}
+
+PartialEmoji EmojiBuilder::build() const { return m_emoji; }
 }  // namespace ekizu

@@ -100,12 +100,13 @@ struct Flags {
 async_main_with_args(int argc, char *argv[], const asio::yield_context &yield) {
 	EKIZU_TRY(Flags{}.init({argv, argv + argc}));
 
-	HttpClient http{bot_token};
+	HttpClient http{yield.get_executor(), bot_token};
 	std::string base64img;
 	std::string content_type;
 
 	if (!avatar_url.empty()) {
-		EKIZU_TRY(auto res, net::HttpConnection::get(avatar_url, yield));
+		EKIZU_TRY(auto res, net::HttpConnection::get(
+								yield.get_executor(), avatar_url, yield));
 		auto img = res.body();
 		content_type = res.base()["content-type"];
 		base64img = base64_encode(img);

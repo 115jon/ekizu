@@ -12,14 +12,12 @@ void to_json(nlohmann::json &j, const AddGuildMemberFields &m) {
 	serialize(j, "deaf", m.deaf);
 }
 
-AddGuildMember::AddGuildMember(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id, Snowflake user_id, std::string_view access_token)
+AddGuildMember::AddGuildMember(RequestSender sender, Snowflake guild_id,
+							   Snowflake user_id, std::string_view access_token)
 	: m_guild_id{guild_id},
 	  m_user_id{user_id},
 	  m_fields{std::string{access_token}},
-	  m_make_request{make_request} {}
+	  m_sender{sender} {}
 
 AddGuildMember::operator net::HttpRequest() const {
 	net::HttpRequest req{
@@ -31,16 +29,5 @@ AddGuildMember::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<GuildMember> AddGuildMember::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<GuildMember>(res.body());
 }
 }  // namespace ekizu

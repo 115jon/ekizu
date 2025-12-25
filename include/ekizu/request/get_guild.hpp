@@ -3,6 +3,7 @@
 
 #include <ekizu/guild.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct GetGuildFields {
@@ -10,26 +11,30 @@ struct GetGuildFields {
 };
 
 struct GetGuild {
-	GetGuild(const std::function<Result<net::HttpResponse>(
-				 net::HttpRequest, const asio::yield_context &)> &make_request,
-			 Snowflake guild_id);
+	GetGuild(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	GetGuild &with_counts(bool with_counts) {
 		m_fields.with_counts = with_counts;
 		return *this;
 	}
 
-	[[nodiscard]] EKIZU_EXPORT Result<Guild> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Guild>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Guild>)>(
+			[this](auto &&handler) {
+				m_sender.send<Guild>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
 	GetGuildFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

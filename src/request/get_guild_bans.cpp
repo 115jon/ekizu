@@ -4,11 +4,8 @@
 namespace ekizu {
 using json_util::deserialize;
 
-GetGuildBans::GetGuildBans(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id)
-	: m_guild_id{guild_id}, m_make_request{make_request} {}
+GetGuildBans::GetGuildBans(RequestSender sender, Snowflake guild_id)
+	: m_guild_id{guild_id}, m_sender{sender} {}
 
 GetGuildBans::operator net::HttpRequest() const {
 	auto url = fmt::format("/guilds/{}/bans", m_guild_id);
@@ -32,16 +29,5 @@ GetGuildBans::operator net::HttpRequest() const {
 	url = fmt::format("{}{}", std::move(url), std::move(params));
 
 	return {net::HttpMethod::get, url, 11};
-}
-
-Result<std::vector<Ban>> GetGuildBans::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<std::vector<Ban>>(res.body());
 }
 }  // namespace ekizu

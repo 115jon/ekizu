@@ -3,24 +3,29 @@
 
 #include <ekizu/http.hpp>
 #include <ekizu/invite.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct GetGuildInvites {
-	GetGuildInvites(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	GetGuildInvites(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	[[nodiscard]] EKIZU_EXPORT Result<std::vector<Invite>> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<std::vector<Invite>>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<std::vector<Invite>>)>(
+			[this](auto &&handler) {
+				m_sender.send<std::vector<Invite>>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

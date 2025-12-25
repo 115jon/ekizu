@@ -1,17 +1,14 @@
 #include <boost/url/encode.hpp>
 #include <boost/url/rfc/unreserved_chars.hpp>
-#include <ekizu/json_util.hpp>
 #include <ekizu/request/get_reactions.hpp>
 
 namespace ekizu {
-GetReactions::GetReactions(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context&)>& make_request,
-	Snowflake channel_id, Snowflake message_id, RequestReaction emoji)
+GetReactions::GetReactions(RequestSender sender, Snowflake channel_id,
+						   Snowflake message_id, RequestReaction emoji)
 	: m_channel_id{channel_id},
 	  m_emoji{std::move(emoji)},
 	  m_message_id{message_id},
-	  m_make_request{make_request} {}
+	  m_sender{sender} {}
 
 GetReactions::operator net::HttpRequest() const {
 	auto query_str = [this] {
@@ -26,7 +23,7 @@ GetReactions::operator net::HttpRequest() const {
 	}();
 
 	auto path = std::visit(
-		[this](auto&& emoji) {
+		[this](auto &&emoji) {
 			using T = std::decay_t<decltype(emoji)>;
 
 			if constexpr (std::is_same_v<T, CustomEmoji>) {
@@ -50,15 +47,5 @@ GetReactions::operator net::HttpRequest() const {
 	auto url = fmt::format("{}{}", path, query_str);
 
 	return {net::HttpMethod::get, url, 11};
-}
-
-Result<std::vector<User>> GetReactions::send(
-	const asio::yield_context& yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-	return json_util::deserialize<std::vector<User>>(res.body());
 }
 }  // namespace ekizu

@@ -3,7 +3,7 @@
 
 #include <boost/asio/detached.hpp>
 #include <boost/asio/spawn.hpp>
-#include <ekizu/util.hpp>
+#include <ekizu/result.hpp>
 
 #define async_main(yield)                                         \
 	ekizu::Result<> async_main(yield);                            \
@@ -20,7 +20,7 @@
 
 #define async_main_with_args(a, b, yield)                          \
 	ekizu::Result<> async_main_with_args(a, b, yield);             \
-	int main(int argc, char** argv) {                              \
+	int main(int argc, char **argv) {                              \
 		int ret{};                                                 \
 		boost::asio::io_context ctx;                               \
 		boost::asio::spawn(                                        \

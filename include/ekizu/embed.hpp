@@ -1,8 +1,7 @@
 #ifndef EKIZU_EMBED_HPP
 #define EKIZU_EMBED_HPP
 
-#include <ekizu/export.h>
-
+#include <ekizu/export.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>

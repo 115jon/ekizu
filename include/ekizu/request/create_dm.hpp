@@ -3,22 +3,28 @@
 
 #include <ekizu/channel.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct CreateDM {
-	CreateDM(const std::function<Result<net::HttpResponse>(
-				 net::HttpRequest, const asio::yield_context &)> &make_request,
-			 Snowflake user_id);
+	EKIZU_EXPORT CreateDM(RequestSender sender, Snowflake user_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	EKIZU_EXPORT Result<Channel> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Channel>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Channel>)>(
+			[this](auto &&handler) {
+				m_sender.send<Channel>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_user_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

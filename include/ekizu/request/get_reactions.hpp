@@ -5,25 +5,32 @@
 
 namespace ekizu {
 struct GetReactions {
-	GetReactions(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context&)>& make_request,
-		Snowflake channel_id, Snowflake message_id, RequestReaction emoji);
+	GetReactions(RequestSender sender, Snowflake channel_id,
+				 Snowflake message_id, RequestReaction emoji);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	GetReactions& after(Snowflake after) {
+	GetReactions &after(Snowflake after) {
 		m_after = after;
 		return *this;
 	}
 
-	GetReactions& limit(uint8_t limit) {
+	GetReactions &limit(uint8_t limit) {
 		m_limit = limit;
 		return *this;
 	}
 
-	[[nodiscard]] EKIZU_EXPORT Result<std::vector<User>> send(
-		const asio::yield_context& yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<std::vector<User>>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<std::vector<User>>)>(
+			[this](auto &&handler) {
+				m_sender.send<std::vector<User>>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	std::optional<Snowflake> m_after;
@@ -31,9 +38,7 @@ struct GetReactions {
 	RequestReaction m_emoji;
 	std::optional<uint8_t> m_limit;
 	Snowflake m_message_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context&)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

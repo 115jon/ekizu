@@ -3,6 +3,7 @@
 
 #include <ekizu/http.hpp>
 #include <ekizu/message.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 enum class InteractionResponseType : uint8_t {
@@ -95,23 +96,38 @@ struct InteractionResponseBuilder {
 };
 
 struct CreateResponse {
-	CreateResponse(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake interaction_id, std::string_view interaction_token,
-		InteractionResponse response);
+	CreateResponse(RequestSender sender, Snowflake interaction_id,
+				   std::string_view interaction_token,
+				   InteractionResponse response);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	EKIZU_EXPORT Result<> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this](auto &&handler) {
+				m_sender.send(
+					*this, [h = std::forward<decltype(handler)>(handler)](
+							   Result<net::HttpResponse> res) mutable {
+						if (!res) { return std::move(h)(res.error()); }
+
+						if (res.value().result() !=
+							net::HttpStatus::no_content) {
+							return std::move(h)(
+								boost::system::errc::operation_not_permitted);
+						}
+
+						std::move(h)(outcome::success());
+					});
+			},
+			token);
+	}
 
    private:
 	Snowflake m_interaction_id;
 	std::string m_interaction_token;
 	InteractionResponse m_response;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

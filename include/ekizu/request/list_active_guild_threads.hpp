@@ -3,6 +3,7 @@
 
 #include <ekizu/channel.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct ListActiveGuildThreadsResponse {
@@ -16,21 +17,25 @@ EKIZU_EXPORT void from_json(const nlohmann::json &j,
 							ListActiveGuildThreadsResponse &response);
 
 struct ListActiveGuildThreads {
-	ListActiveGuildThreads(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	ListActiveGuildThreads(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	EKIZU_EXPORT Result<ListActiveGuildThreadsResponse> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(
+		void(Result<ListActiveGuildThreadsResponse>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<
+			CompletionToken, void(Result<ListActiveGuildThreadsResponse>)>(
+			[this](auto &&handler) {
+				m_sender.send<ListActiveGuildThreadsResponse>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

@@ -1,79 +1,179 @@
 #ifndef EKIZU_WS_HPP
 #define EKIZU_WS_HPP
 
-#include <ekizu/export.h>
-
-#include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/spawn.hpp>
-#include <boost/beast/core/tcp_stream.hpp>
-#include <boost/beast/ssl.hpp>
-#include <boost/beast/websocket.hpp>
-#include <ekizu/util.hpp>
-#include <variant>
-
-namespace ekizu {
-namespace asio = boost::asio;
-}  // namespace ekizu
+#include <boost/asio/any_completion_handler.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/async_result.hpp>
+#include <boost/beast/websocket/error.hpp>
+#include <boost/beast/websocket/rfc6455.hpp>
+#include <boost/core/span.hpp>
+#include <ekizu/export.hpp>
+#include <ekizu/result.hpp>
+#include <memory>
+#include <optional>
+#include <string>
 
 namespace ekizu::net {
-namespace beast = boost::beast;
-using asio::ip::tcp;
-namespace ws = beast::websocket;
-using tcp_stream = beast::tcp_stream;
-using ssl_stream = beast::ssl_stream<tcp_stream>;
+namespace ws = boost::beast::websocket;
 using WebSocketCloseCode = ws::close_code;
 
-struct WebSocketClientBuilder;
-
 struct WebSocketMessage {
-	/// The message payload.
 	std::string payload;
-	/// Whether or not the message is binary.
 	bool is_binary;
 };
 
 struct WebSocketClient {
-	[[nodiscard]] EKIZU_EXPORT static Result<WebSocketClient> connect(
-		std::string_view url, const asio::yield_context &yield);
+	WebSocketClient(const WebSocketClient &) = delete;
+	WebSocketClient &operator=(const WebSocketClient &) = delete;
 
-	[[nodiscard]] EKIZU_EXPORT std::optional<ws::close_reason> close_reason()
-		const {
-		return m_close_reason;
+	EKIZU_EXPORT WebSocketClient(WebSocketClient &&) noexcept;
+	EKIZU_EXPORT WebSocketClient &operator=(WebSocketClient &&) noexcept;
+	EKIZU_EXPORT ~WebSocketClient();
+
+	using CompletionExecutor = boost::asio::any_completion_executor;
+
+	/**
+	 * @brief Asynchronously connects to a WebSocket URL.
+	 *
+	 * @param url The URL (ws:// or wss://)
+	 * @param token The completion token (callback, use_awaitable, etc.)
+	 */
+	template <typename CompletionToken = boost::asio::
+				  default_completion_token_t<boost::asio::any_io_executor>>
+	static auto connect(
+		boost::asio::any_io_executor executor, std::string url,
+		CompletionToken &&token = boost::asio::default_completion_token_t<
+			boost::asio::any_io_executor>{}) {
+		return boost::asio::async_initiate<CompletionToken,
+										   void(Result<WebSocketClient>)>(
+			[](auto handler, std::string u, boost::asio::any_io_executor ex) {
+				CompletionExecutor handler_ex =
+					boost::asio::get_associated_executor(handler, ex);
+
+				connect_impl(
+					std::move(u), std::move(ex),
+					[h = std::move(handler)](
+						Result<WebSocketClient> r) mutable {
+						std::move(h)(std::move(r));
+					},
+					std::move(handler_ex));
+			},
+			token, std::move(url), executor);
 	}
 
-	[[nodiscard]] EKIZU_EXPORT bool is_open() const;
+	/**
+	 * @brief Asynchronously reads a message.
+	 */
+	template <typename CompletionToken>
+	auto read(CompletionToken &&token) {
+		return boost::asio::async_initiate<CompletionToken,
+										   void(Result<WebSocketMessage>)>(
+			[this](auto handler) {
+				CompletionExecutor handler_ex =
+					boost::asio::get_associated_executor(
+						handler, get_executor());
 
-	EKIZU_EXPORT Result<> close(ws::close_reason reason,
-								const asio::yield_context &yield);
-	EKIZU_EXPORT Result<WebSocketMessage> read(
-		const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> send(std::string_view message,
-							   const asio::yield_context &yield);
+				read_impl(
+					[h = std::move(handler)](
+						Result<WebSocketMessage> r) mutable {
+						std::move(h)(std::move(r));
+					},
+					std::move(handler_ex));
+			},
+			token);
+	}
+
+	/**
+	 * @brief Asynchronously closes the connection.
+	 */
+	template <typename CompletionToken>
+	auto close(ws::close_reason reason, CompletionToken &&token) {
+		return boost::asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, reason](auto handler) mutable {
+				CompletionExecutor handler_ex =
+					boost::asio::get_associated_executor(
+						handler, get_executor());
+
+				close_impl(
+					reason,
+					[h = std::move(handler)](Result<> r) mutable {
+						std::move(h)(std::move(r));
+					},
+					std::move(handler_ex));
+			},
+			token);
+	}
+
+	// Convenience wrapper for string literals
+	template <typename CompletionToken>
+	auto send(std::string_view msg, CompletionToken &&token) {
+		return send(
+			std::string(msg), false, std::forward<CompletionToken>(token));
+	}
+
+	// Convenience wrapper for bytes
+	template <typename CompletionToken>
+	auto send_bytes(boost::span<const std::byte> msg, CompletionToken &&token) {
+		return send(
+			std::string(reinterpret_cast<const char *>(msg.data()), msg.size()),
+			true, std::forward<CompletionToken>(token));
+	}
+
+	[[nodiscard]] bool is_open() const;
+	[[nodiscard]] boost::asio::any_io_executor get_executor();
+	[[nodiscard]] std::optional<ws::close_reason> close_reason() const;
+	void cancel();
 
    private:
-	friend WebSocketClientBuilder;
+	friend struct ConnectOp;
+	struct Impl;
+	std::shared_ptr<Impl> m_impl;
 
-	explicit WebSocketClient(
-		tcp::resolver resolver,
-		std::variant<ws::stream<tcp_stream>, ws::stream<ssl_stream>> ws,
-		std::string host, std::string path);
+	// Internal constructor used by connect_impl
+	explicit WebSocketClient(std::shared_ptr<Impl> impl);
 
-	Result<> do_send(std::string_view message,
-					 const asio::yield_context &yield);
-	Result<> pinger(const asio::yield_context &yield);
+	/**
+	 * @brief Asynchronously sends a message.
+	 */
+	template <typename CompletionToken>
+	auto send(std::string msg, bool is_binary, CompletionToken &&token) {
+		return boost::asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, msg = std::move(msg), is_binary](auto handler) mutable {
+				CompletionExecutor handler_ex =
+					boost::asio::get_associated_executor(
+						handler, get_executor());
 
-	boost::optional<asio::io_context &> m_ctx;
-	std::optional<tcp::resolver> m_resolver;
-	std::variant<ws::stream<tcp_stream>, ws::stream<ssl_stream>> m_stream;
-	beast::flat_buffer m_buffer;
-	std::string m_host;
-	std::string m_path;
-	bool m_closing{};
-	uint64_t m_tasks{};
-	std::optional<asio::deadline_timer> m_timer;
-	std::optional<ws::close_reason> m_close_reason;
-	std::optional<asio::steady_timer> m_ping_timer;
+				send_impl(
+					std::move(msg), is_binary,
+					[h = std::move(handler)](Result<> r) mutable {
+						std::move(h)(std::move(r));
+					},
+					std::move(handler_ex));
+			},
+			token);
+	}
+
+	// ABI Boundary: These methods accept type-erased handlers
+	static void connect_impl(
+		std::string url, boost::asio::any_io_executor executor,
+		boost::asio::any_completion_handler<void(Result<WebSocketClient>)>
+			handler,
+		CompletionExecutor handler_ex);
+
+	void read_impl(
+		boost::asio::any_completion_handler<void(Result<WebSocketMessage>)>
+			handler,
+		CompletionExecutor handler_ex);
+
+	void send_impl(std::string msg, bool is_binary,
+				   boost::asio::any_completion_handler<void(Result<>)> handler,
+				   CompletionExecutor handler_ex);
+
+	void close_impl(ws::close_reason reason,
+					boost::asio::any_completion_handler<void(Result<>)> handler,
+					CompletionExecutor handler_ex);
 };
+
 }  // namespace ekizu::net
 
 #endif	// EKIZU_WS_HPP

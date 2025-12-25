@@ -3,28 +3,26 @@
 
 #include <ekizu/http.hpp>
 #include <ekizu/invite.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct CreateInviteFields {
-	std::optional<uint32_t> max_age{};
-	std::optional<uint32_t> max_uses{};
-	std::optional<bool> temporary{};
-	std::optional<bool> unique{};
-	std::optional<TargetType> target_type{};
-	std::optional<Snowflake> target_user_id{};
-	std::optional<Snowflake> target_application_id{};
+	std::optional<uint32_t> max_age;
+	std::optional<uint32_t> max_uses;
+	std::optional<bool> temporary;
+	std::optional<bool> unique;
+	std::optional<TargetType> target_type;
+	std::optional<Snowflake> target_user_id;
+	std::optional<Snowflake> target_application_id;
 };
 
 EKIZU_EXPORT void to_json(nlohmann::json &j, const CreateInviteFields &f);
 EKIZU_EXPORT void from_json(const nlohmann::json &j, CreateInviteFields &f);
 
 struct CreateInvite {
-	CreateInvite(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake channel_id);
+	CreateInvite(RequestSender sender, Snowflake channel_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	// TODO: Add validation
 	CreateInvite &max_age(uint32_t max_age) {
@@ -62,15 +60,21 @@ struct CreateInvite {
 		return *this;
 	}
 
-	[[nodiscard]] EKIZU_EXPORT Result<Invite> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<Invite>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<Invite>)>(
+			[this](auto &&handler) {
+				m_sender.send<Invite>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_channel_id;
 	CreateInviteFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

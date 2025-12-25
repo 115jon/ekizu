@@ -1,9 +1,8 @@
 #ifndef EKIZU_PERMISSIONS_HPP
 #define EKIZU_PERMISSIONS_HPP
 
-#include <ekizu/export.h>
-
 #include <cstdint>
+#include <ekizu/export.hpp>
 #include <nlohmann/json_fwd.hpp>
 #include <type_traits>
 

@@ -26,23 +26,23 @@ if(UNIX)
     add_compile_options("$<$<CONFIG:DEBUG>:-D_DEBUG>")
 endif()
 
+string(TOLOWER ${PROJECT_NAME} PROJECT_NAME_LOWERCASE)
+string(TOUPPER ${PROJECT_NAME} PROJECT_NAME_UPPERCASE)
+
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+option(ekizu_BUILD_EXAMPLES "Build the examples" OFF)
+option(ekizu_BUILD_TESTS "Build the tests" OFF)
+option(ekizu_ENABLE_TESTING_HOOKS
+       "Enable internal test-only hooks (EKIZU_TESTING)" OFF
+)
 option(ekizu_INSTALL "Generate the install target" ON)
 option(ekizu_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
-
-include(CMakeDependentOption)
-
-cmake_dependent_option(
-    ekizu_BUILD_EXAMPLES "Build the examples" ON "ekizu_MASTER_PROJECT" OFF
-)
 
 if(BUILD_SHARED_LIBS)
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 endif()
-
-include(cmake/CPM.cmake)
 
 file(GLOB_RECURSE sources CONFIGURE_DEPENDS "include/*.hpp" "src/*.cpp")
 
@@ -61,8 +61,8 @@ target_compile_options(
 
 target_include_directories(
     ekizu
-    PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-           $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/export>
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
            $<INSTALL_INTERFACE:include>
 )
 
@@ -81,173 +81,57 @@ include(cmake/CompilerWarnings.cmake)
 
 set_project_warnings(ekizu)
 
-set(TRY_BOOST_VERSION "1.81.0")
-set(BOOST_NOT_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED
-    "coroutine;filesystem;thread;url"
-)
-set(BOOST_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED "asio;beast;outcome")
-
-set(IS_BOOST_LOCAL OFF)
-if(${CPM_LOCAL_PACKAGES_ONLY})
-    message(STATUS "Trying to find Boost...")
-    find_package(
-        Boost ${TRY_BOOST_VERSION} REQUIRED
-        COMPONENTS ${BOOST_NOT_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED}
-    )
-    set(IS_BOOST_LOCAL ON)
-elseif(${CPM_USE_LOCAL_PACKAGES} OR NOT ${CPM_DOWNLOAD_ALL})
-    message(STATUS "Trying to use local Boost...")
-    find_package(
-        Boost ${TRY_BOOST_VERSION}
-        COMPONENTS ${BOOST_NOT_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED}
-    )
-    if(${BOOST_FOUND})
-        set(IS_BOOST_LOCAL ON)
-        message(DEBUG "boost include dir: ${Boost_INCLUDE_DIRS}")
-    endif()
-endif()
-
-if(NOT (${BOOST_FOUND}) OR (NOT DEFINED BOOST_FOUND))
-    message(STATUS "Trying to download Boost...")
-    set(BOOST_INCLUDE_LIBRARIES
-        "${BOOST_NOT_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED};${BOOST_HEADER_ONLY_COMPONENTS_THAT_YOU_NEED}"
-    )
-    set(BOOST_SKIP_INSTALL_RULES OFF)
-    cpmaddpackage(
-        NAME
-        Boost
-        URL
-        "https://github.com/jontitorr/boost-cmake/releases/download/1.84.0-release/boost-1.84.0.tar.xz"
-    )
-    set(IS_BOOST_LOCAL OFF)
-endif()
-
-cpmfindpackage(
-    NAME
-    "OpenSSL"
-    GITHUB_REPOSITORY
-    "jontitorr/openssl-cmake"
-    GIT_TAG
-    "master"
-    OPTIONS
-    "WITH_APPS OFF"
-)
-
-if(OpenSSL_ADDED)
-    add_library(OpenSSL::Crypto ALIAS crypto)
-    add_library(OpenSSL::SSL ALIAS ssl)
-    install(TARGETS crypto ssl EXPORT ekizuTargets)
-else()
-    set(SEPARATE_DEPENDENCIES "OpenSSL;SSL;")
-endif()
-
-cpmfindpackage(NAME "fmt" GITHUB_REPOSITORY "fmtlib/fmt" GIT_TAG "75f3b1c")
-set(SEPARATE_DEPENDENCIES "${SEPARATE_DEPENDENCIES}fmt;;")
-
 if(WIN32)
     target_compile_definitions(
         ekizu PUBLIC _SILENCE_STDEXT_ARR_ITERS_DEPRECATION_WARNING
     )
 endif()
 
-cpmaddpackage(
-    NAME certify GITHUB_REPOSITORY "jontitorr/certify" GIT_TAG "master"
-)
+find_package(Boost REQUIRED COMPONENTS asio charconv filesystem url)
+find_package(fmt CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(OpenSSL REQUIRED)
+find_package(Opus CONFIG REQUIRED)
+find_package(unofficial-sodium CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
+add_subdirectory(3rdparty/certify)
+find_package(MLSPP CONFIG REQUIRED)
+find_package(libdave CONFIG REQUIRED)
 
-cpmaddpackage(NAME Opus GITHUB_REPOSITORY "xiph/opus" GIT_TAG "main")
-set(SEPARATE_DEPENDENCIES "${SEPARATE_DEPENDENCIES}Opus;;")
-
-cpmaddpackage(
-    NAME
-    Sodium
-    GITHUB_REPOSITORY
-    "jontitorr/libsodium-cmake"
-    GIT_TAG
-    "master"
-    OPTIONS
-    "SODIUM_DISABLE_TESTS ON"
-    "SODIUM_MINIMAL ON"
-)
-
-install(TARGETS sodium EXPORT ekizuTargets)
-
-set(SEPARATE_DEPENDENCIES
-    "${SEPARATE_DEPENDENCIES}Threads;;Boost;coroutine,date_time,filesystem,system,thread,url"
-)
-
-if(NOT ${IS_BOOST_LOCAL})
-    add_library(boost INTERFACE)
-    target_link_libraries(
-        boost INTERFACE $<BUILD_INTERFACE:Boost::asio Boost::beast
-                        Boost::outcome> $<INSTALL_INTERFACE:Boost::headers>
-    )
-    add_library(Boost::boost ALIAS boost)
-    install(TARGETS boost EXPORT ekizuTargets)
-endif()
-
-cpmaddpackage(
-    NAME
-    "nlohmann_json"
-    VERSION
-    "3.11.1"
-    URL
-    "https://github.com/nlohmann/json/releases/download/v3.11.1/include.zip"
-    URL_HASH
-    "SHA256=9c15ca7806f863872452bfbc85fee6d1c9868117e3ea5e00a204ae961a2e1ae7"
-)
-
-add_library(nlohmann_json INTERFACE)
-target_include_directories(
-    nlohmann_json
-    INTERFACE $<BUILD_INTERFACE:${nlohmann_json_SOURCE_DIR}/include>
-              $<INSTALL_INTERFACE:include>
-)
-
-install(TARGETS core nlohmann_json EXPORT ekizuTargets)
-
-find_package(ZLIB)
-
-if(ZLIB_FOUND)
-    set(SEPARATE_DEPENDENCIES "${SEPARATE_DEPENDENCIES}ZLIB;;")
-else()
-    cpmaddpackage(
-        NAME
-        "ZLIB"
-        GITHUB_REPOSITORY
-        "zlib-ng/zlib-ng"
-        GIT_TAG
-        "2.0.6"
-        OPTIONS
-        "ZLIB_COMPAT ON"
-        "ZLIB_ENABLE_TESTS OFF"
-        "SKIP_INSTALL_ALL ON"
-    )
-
-    add_library(ZLIB::ZLIB ALIAS zlib)
-    list(APPEND ekizu_TARGETS zlib)
-    install(TARGETS zlib EXPORT ekizuTargets)
-endif()
-
+target_compile_definitions(ekizu PUBLIC BOOST_ASIO_NO_DEPRECATED)
 target_link_libraries(
     ekizu
-    PUBLIC Boost::boost certify::core Boost::coroutine Boost::thread fmt::fmt
-           nlohmann_json
-    PRIVATE Boost::url ZLIB::ZLIB opus sodium
+    PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
+    PRIVATE Boost::charconv Boost::url ZLIB::ZLIB Opus::opus
+            unofficial-sodium::sodium libdave::libdave
 )
 
 include(GenerateExportHeader)
 
-generate_export_header(ekizu EXPORT_FILE_NAME export/ekizu/export.h)
+generate_export_header(
+    ekizu EXPORT_FILE_NAME
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/ekizu/export.hpp
+)
 
 if(ekizu_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(ekizu_BUILD_TESTS)
+    enable_testing()
+    find_package(Catch2 3 REQUIRED)
+    add_subdirectory(tests)
+endif()
+
+if(ekizu_ENABLE_TESTING_HOOKS)
+    target_compile_definitions(ekizu PUBLIC EKIZU_TESTING)
 endif()
 
 if(ekizu_INSTALL)
     include(GNUInstallDirs)
 
     install(
-        TARGETS ekizu
+        TARGETS ekizu core
         EXPORT ekizuTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -264,17 +148,13 @@ if(ekizu_INSTALL)
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ekizu
     )
 
-    install(DIRECTORY ${nlohmann_json_SOURCE_DIR}/include/nlohmann
-            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    )
-
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.h.in include/ekizu/version.h
-        @ONLY
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.hpp.in
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/ekizu/version.hpp @ONLY
     )
 
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/export/ekizu/export.h
-                  ${CMAKE_CURRENT_BINARY_DIR}/include/ekizu/version.h
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/generated/ekizu/export.hpp
+                  ${CMAKE_CURRENT_BINARY_DIR}/generated/ekizu/version.hpp
             DESTINATION include/ekizu
     )
 

@@ -3,6 +3,7 @@
 
 #include <ekizu/ban.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct GetGuildBansFields {
@@ -12,12 +13,9 @@ struct GetGuildBansFields {
 };
 
 struct GetGuildBans {
-	GetGuildBans(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	GetGuildBans(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	GetGuildBans &limit(uint64_t limit) {
 		m_fields.limit = limit;
@@ -34,15 +32,22 @@ struct GetGuildBans {
 		return *this;
 	}
 
-	EKIZU_EXPORT Result<std::vector<Ban>> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<std::vector<Ban>>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<std::vector<Ban>>)>(
+			[this](auto &&handler) {
+				m_sender.send<std::vector<Ban>>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
 	GetGuildBansFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

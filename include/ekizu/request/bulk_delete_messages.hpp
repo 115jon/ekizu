@@ -2,26 +2,41 @@
 #define EKIZU_REQUEST_BULK_DELETE_MESSAGES_HPP
 
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 #include <ekizu/snowflake.hpp>
 
 namespace ekizu {
 struct BulkDeleteMessages {
-	BulkDeleteMessages(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake channel_id, const std::vector<Snowflake> &message_ids);
+	BulkDeleteMessages(RequestSender sender, Snowflake channel_id,
+					   const std::vector<Snowflake> &message_ids);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	[[nodiscard]] EKIZU_EXPORT Result<> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this](auto &&handler) {
+				m_sender.send(
+					*this, [h = std::forward<decltype(handler)>(handler)](
+							   Result<net::HttpResponse> res) mutable {
+						if (!res) { return std::move(h)(res.error()); }
+
+						if (res.value().result() !=
+							net::HttpStatus::no_content) {
+							return std::move(h)(
+								boost::system::errc::operation_not_permitted);
+						}
+
+						std::move(h)(outcome::success());
+					});
+			},
+			token);
+	}
 
    private:
 	Snowflake m_channel_id;
 	std::vector<Snowflake> m_message_ids;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

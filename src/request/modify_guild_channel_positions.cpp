@@ -20,12 +20,9 @@ void from_json(const nlohmann::json &j, ModifyGuildChannelPosition &f) {
 }
 
 ModifyGuildChannelPositions::ModifyGuildChannelPositions(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id, std::vector<ModifyGuildChannelPosition> channels)
-	: m_guild_id{guild_id},
-	  m_channels{std::move(channels)},
-	  m_make_request{make_request} {}
+	RequestSender sender, Snowflake guild_id,
+	std::vector<ModifyGuildChannelPosition> channels)
+	: m_guild_id{guild_id}, m_channels{std::move(channels)}, m_sender{sender} {}
 
 ModifyGuildChannelPositions::operator net::HttpRequest() const {
 	net::HttpRequest req{
@@ -36,20 +33,5 @@ ModifyGuildChannelPositions::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<> ModifyGuildChannelPositions::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	if (res.result() == net::HttpStatus::no_content) {
-		return outcome::success();
-	}
-
-	return boost::system::errc::operation_not_permitted;
 }
 }  // namespace ekizu

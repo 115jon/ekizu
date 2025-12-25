@@ -1,3 +1,5 @@
+#include <fmt/format.h>
+
 #include <ekizu/gateway/voice_server_update.hpp>
 #include <ekizu/json_util.hpp>
 

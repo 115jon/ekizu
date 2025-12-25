@@ -33,11 +33,8 @@ void from_json(const nlohmann::json &j, CreateMessageFields &f) {
 	deserialize(j, "flags", f.flags);
 }
 
-CreateMessage::CreateMessage(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake channel_id)
-	: m_channel_id{channel_id}, m_make_request{make_request} {}
+CreateMessage::CreateMessage(RequestSender sender, Snowflake channel_id)
+	: m_channel_id{channel_id}, m_sender{sender} {}
 
 CreateMessage::operator net::HttpRequest() const {
 	net::HttpRequest req{net::HttpMethod::post,
@@ -48,15 +45,5 @@ CreateMessage::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<Message> CreateMessage::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Message>(res.body());
 }
 }  // namespace ekizu

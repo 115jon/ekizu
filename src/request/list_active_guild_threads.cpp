@@ -17,26 +17,13 @@ void from_json(const nlohmann::json &j,
 	deserialize(j, "members", response.members);
 }
 
-ListActiveGuildThreads::ListActiveGuildThreads(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id)
-	: m_guild_id{guild_id}, m_make_request{make_request} {}
+ListActiveGuildThreads::ListActiveGuildThreads(RequestSender sender,
+											   Snowflake guild_id)
+	: m_guild_id{guild_id}, m_sender{sender} {}
 
 ListActiveGuildThreads::operator net::HttpRequest() const {
 	return net::HttpRequest{
 		net::HttpMethod::get,
 		fmt::format("/guilds/{}/threads/active", m_guild_id), 11};
-}
-
-Result<ListActiveGuildThreadsResponse> ListActiveGuildThreads::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return deserialize<ListActiveGuildThreadsResponse>(res.body());
 }
 }  // namespace ekizu

@@ -1,30 +1,18 @@
-cmake_minimum_required(VERSION 3.15)
 project(${CMAKE_PROJECT_NAME}_examples LANGUAGES C CXX)
 
-cpmfindpackage(
-    NAME portaudio GITHUB_REPOSITORY "PortAudio/portaudio" GIT_TAG "v19.7.0"
-)
-
-cpmfindpackage(
-    NAME
-    "spdlog"
-    GITHUB_REPOSITORY
-    "gabime/spdlog"
-    GIT_TAG
-    "v1.12.0"
-    OPTIONS
-    "SPDLOG_FMT_EXTERNAL ON"
-)
-
 file(GLOB_RECURSE examples "*.cpp")
+
+find_package(Boost REQUIRED COMPONENTS coroutine2)
+find_package(portaudio REQUIRED)
+find_package(spdlog REQUIRED)
 
 foreach(example ${examples})
     get_filename_component(example_name ${example} NAME_WE)
     add_executable(${example_name} ${example})
     target_link_libraries(
-        ${example_name} PRIVATE ${CMAKE_PROJECT_NAME} portaudio_static
-                                spdlog::spdlog sodium
+        ${example_name} PRIVATE ${CMAKE_PROJECT_NAME} portaudio spdlog::spdlog
+                                Boost::coroutine2
     )
 endforeach()
 
-file(COPY airhorn.dca DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY airhorn.dca DESTINATION ${CMAKE_BINARY_DIR}/bin)

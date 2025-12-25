@@ -2,12 +2,13 @@
 #define EKIZU_REQUEST_MODIFY_CURRENT_USER_HPP
 
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 #include <ekizu/user.hpp>
 
 namespace ekizu {
 struct ModifyCurrentUserFields {
-	std::optional<std::string> avatar{};
-	std::optional<std::string> username{};
+	std::optional<std::string> avatar;
+	std::optional<std::string> username;
 };
 
 EKIZU_EXPORT void to_json(nlohmann::json &j, const ModifyCurrentUserFields &f);
@@ -15,11 +16,9 @@ EKIZU_EXPORT void from_json(const nlohmann::json &j,
 							ModifyCurrentUserFields &f);
 
 struct ModifyCurrentUser {
-	explicit ModifyCurrentUser(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request);
+	explicit ModifyCurrentUser(RequestSender sender);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	ModifyCurrentUser &avatar(std::string_view avatar) {
 		m_fields.avatar = avatar;
@@ -32,13 +31,20 @@ struct ModifyCurrentUser {
 		return *this;
 	}
 
-	EKIZU_EXPORT Result<User> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<User>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<User>)>(
+			[this](auto &&handler) {
+				m_sender.send<User>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	ModifyCurrentUserFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

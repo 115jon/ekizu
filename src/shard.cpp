@@ -1,5 +1,9 @@
 #include <fmt/format.h>
 
+#include <boost/asio/bind_executor.hpp>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/post.hpp>
+#include <cmath>
 #include <ekizu/json_util.hpp>
 #include <ekizu/shard.hpp>
 
@@ -78,14 +82,40 @@ ekizu::Result<ekizu::Event> event_from_str(std::string_view event_type,
 	// Not an error, we just don't handle it.
 	return boost::system::error_code{};
 }
+
+template <typename Fn>
+void post_via(ekizu::asio::any_io_executor via,
+			  ekizu::Shard::CompletionExecutor ex, Fn fn) {
+	ekizu::asio::post(std::move(via),
+					  ekizu::asio::bind_executor(std::move(ex), std::move(fn)));
+}
+
+template <typename R>
+void post_completion(ekizu::asio::any_io_executor via,
+					 ekizu::Shard::CompletionExecutor ex,
+					 ekizu::asio::any_completion_handler<void(R)> h, R r) {
+	post_via(std::move(via), std::move(ex),
+			 [h = std::move(h), r = std::move(r)]() mutable {
+				 std::move(h)(std::move(r));
+			 });
+}
+
+bool is_transient_read_error(const boost::system::error_code &ec) {
+	return ec == ekizu::asio::error::operation_aborted ||
+		   ec == ekizu::asio::error::eof ||
+		   ec == ekizu::asio::error::connection_reset ||
+		   ec == ekizu::net::ws::error::closed;
+}
+
 }  // namespace
+   // namespace
 
 namespace ekizu {
-
 void to_json(nlohmann::json &j, const UpdatePresence &p) {
 	using json_util::serialize;
 	if (p.idle_since) {
 		j["since"] = *p.idle_since;
+
 	} else {
 		j["since"] = nullptr;
 	}
@@ -104,200 +134,6 @@ void Shard::attach_logger(std::function<void(Log)> on_log) {
 	m_on_log = std::move(on_log);
 }
 
-Result<> Shard::close_impl(CloseFrame reason,
-						   const asio::yield_context &yield) {
-	if (!m_ws) { return boost::system::errc::not_connected; }
-
-	// Stop heartbeat first
-	if (m_timer) {
-		m_heartbeat_running = false;
-		m_timer->cancel();
-		m_timer.reset();
-	}
-
-	if (reason.code == net::ws::close_code::normal ||
-		reason.code == net::ws::close_code::going_away) {
-		m_resume_gateway_url.reset();
-		m_session.reset();
-	}
-
-	log(fmt::format("sending websocket close message | code={}, reason={}",
-					reason.code, reason.reason.data()));
-	return m_ws->close(
-		net::ws::close_reason{static_cast<net::ws::close_code>(reason.code),
-							  boost::string_view{
-								  reason.reason,
-							  }},
-		yield);
-}
-
-Result<> Shard::join_voice_channel_impl(Snowflake guild_id,
-										Snowflake channel_id,
-										const asio::yield_context &yield) {
-	nlohmann::json payload{
-		{"op", static_cast<uint8_t>(GatewayOpcode::VoiceStateUpdate)},
-		{"d",
-		 {
-			 {"guild_id", guild_id},
-			 {"channel_id", channel_id},
-			 {"self_mute", false},
-			 {"self_deaf", false},
-		 }},
-	};
-	log(fmt::format(
-		"joining voice channel | guild_id={}, channel_id={}, raw={}", guild_id,
-		channel_id, payload.dump()));
-	return m_ws->send(payload.dump(), yield);
-}
-
-Result<> Shard::leave_voice_channel_impl(Snowflake guild_id,
-										 const asio::yield_context &yield) {
-	nlohmann::json payload{
-		{"op", static_cast<uint8_t>(GatewayOpcode::VoiceStateUpdate)},
-		{"d",
-		 {
-			 {"guild_id", guild_id},
-			 {"channel_id", nullptr},
-			 {"self_mute", false},
-			 {"self_deaf", false},
-		 }},
-	};
-	log(fmt::format("leaving voice channel | guild_id={}, raw={}", guild_id,
-					payload.dump()));
-	return m_ws->send(payload.dump(), yield);
-}
-
-Result<Event> Shard::next_event_impl(const asio::yield_context &yield) {
-	EKIZU_TRY(auto msg, next_message(yield));
-	if (m_inflater && msg.is_binary) {
-		EKIZU_TRY(auto inflated, m_inflater->inflate(msg.payload));
-		msg.payload = inflated;
-	}
-	return handle_event(msg.payload, yield);
-}
-
-Result<> Shard::update_presence_impl(UpdatePresence presence,
-									 const asio::yield_context &yield) {
-	nlohmann::json payload{
-		{"op", static_cast<uint8_t>(GatewayOpcode::PresenceUpdate)},
-		{"d", presence},
-	};
-	log(fmt::format("updating presence | raw={}", payload.dump()));
-	return m_ws->send(payload.dump(), yield);
-}
-
-Result<Event> Shard::handle_event(std::string_view data,
-								  const asio::yield_context &yield) {
-	const auto json = nlohmann::json::parse(data, nullptr, false);
-	if (json.is_discarded() || !json.contains("op") ||
-		!json["op"].is_number()) {
-		return boost::system::errc::invalid_argument;
-	}
-
-	switch (static_cast<GatewayOpcode>(json["op"].get<uint8_t>())) {
-		case GatewayOpcode::Dispatch: return handle_dispatch(json);
-		case GatewayOpcode::Heartbeat: {
-			// https://discord.com/developers/docs/topics/gateway#heartbeat-requests
-			EKIZU_TRY(send_heartbeat(yield));
-			break;
-		}
-		case GatewayOpcode::Reconnect: {
-			EKIZU_TRY(handle_reconnect(yield));
-			break;
-		}
-		case GatewayOpcode::InvalidSession: {
-			EKIZU_TRY(handle_invalid_session(json, yield));
-			break;
-		}
-		case GatewayOpcode::Hello: {
-			EKIZU_TRY(handle_hello(json, yield));
-			break;
-		}
-		case GatewayOpcode::HeartbeatAck: {
-			handle_heartbeat_ack();
-			break;
-		}
-		default: break;
-	}
-
-	// Not a failure, but not a success either.
-	return boost::system::error_code{};
-}
-
-Result<Event> Shard::handle_dispatch(const nlohmann::json &data) {
-	if (!data.contains("t") || !data["t"].is_string() || !data.contains("d") ||
-		!data["d"].is_object()) {
-		return boost::system::errc::invalid_argument;
-	}
-
-	std::optional<uint64_t> sequence;
-	if (data.contains("s") && data["s"].is_number()) { sequence = data["s"]; }
-	const std::string event_type = data["t"];
-	const auto &event = data["d"];
-	log(fmt::format(
-		"received dispatch {{t: {}, s: {}, d: {}}}", event_type,
-		sequence ? boost::to_string(*sequence) : "null", event.dump()));
-
-	if (event_type == "READY") {
-		if (!event.contains("resume_gateway_url") ||
-			!event["resume_gateway_url"].is_string() ||
-			!event.contains("session_id") || !event["session_id"].is_string()) {
-			return boost::system::errc::invalid_argument;
-		}
-		m_session.emplace(
-			event["session_id"].get<std::string>(), sequence.value_or(0));
-		m_resume_gateway_url = event["resume_gateway_url"].get<std::string>();
-		log(fmt::format("received ready | resume_gateway_url={}, session_id={}",
-						*m_resume_gateway_url, m_session->id));
-	}
-
-	if (m_session && sequence) {
-		// TODO: Handle out of order sequences.
-		m_session->sequence = *sequence;
-	}
-
-	return event_from_str(event_type, event);
-}
-
-Result<> Shard::handle_reconnect(const asio::yield_context &yield) {
-	log("received reconnect");
-	return close_impl(CloseFrame::RESUME, yield);
-}
-
-Result<> Shard::handle_invalid_session(const nlohmann::json &data,
-									   const asio::yield_context &yield) {
-	if (!data.contains("d") || !data["d"].is_boolean()) {
-		return boost::system::errc::invalid_argument;
-	}
-
-	bool resumable = data["d"];
-	log(fmt::format("received invalid session | resumable={}", resumable));
-	return close_impl(
-		resumable ? CloseFrame::RESUME : CloseFrame::NORMAL, yield);
-}
-
-Result<> Shard::handle_hello(const nlohmann::json &data,
-							 const asio::yield_context &yield) {
-	m_last_heartbeat_acked = true;
-	if (!data.contains("d")) { return boost::system::errc::invalid_argument; }
-	const auto &hello = data["d"];
-	if (!hello.contains("heartbeat_interval") ||
-		!hello["heartbeat_interval"].is_number_unsigned()) {
-		return boost::system::errc::invalid_argument;
-	}
-
-	const uint32_t heartbeat_interval = hello["heartbeat_interval"];
-	log(fmt::format(
-		"received hello | heartbeat_interval={}", heartbeat_interval));
-	EKIZU_TRY(start_heartbeat(heartbeat_interval));
-	return m_session ? send_resume(yield) : send_identify(yield);
-}
-
-void Shard::handle_heartbeat_ack() {
-	m_last_heartbeat_acked = true;
-	log("received heartbeat ack");
-}
-
 void Shard::log(std::string_view msg, LogLevel level) const {
 	if (!m_on_log) { return; }
 	m_on_log(Log{
@@ -307,134 +143,212 @@ void Shard::log(std::string_view msg, LogLevel level) const {
 	});
 }
 
-Result<net::WebSocketMessage> Shard::next_message(
-	const asio::yield_context &yield) {
-	while (true) {
-		if (!m_ws || !m_ws->is_open()) { EKIZU_TRY(reconnect(yield)); }
-		auto res = m_ws->read(yield);
-		if (res) { return res.value(); }
-
-		const auto ec = res.error();
-		if (m_ws->close_reason()) {
-			log(fmt::format(
-					"read error | ec={}, msg={}, close_reason={{code={}, "
-					"reason={}}}",
-					ec.value(), ec.message(), m_ws->close_reason()->code,
-					m_ws->close_reason()->reason.data()),
-				LogLevel::Error);
-		} else {
-			log(fmt::format(
-					"read error | ec={}, msg={}", ec.value(), ec.message()),
-				LogLevel::Error);
+void Shard::close_impl(CloseFrame reason,
+					   asio::any_completion_handler<void(Result<>)> h,
+					   CompletionExecutor hex) {
+	auto via = get_executor();
+	asio::dispatch(m_strand, [this, via, reason, h = std::move(h),
+							  hex = std::move(hex)]() mutable {
+		if (!m_ws) {
+			post_completion(via, std::move(hex), std::move(h),
+							Result<>{boost::system::errc::not_connected});
+			return;
 		}
 
-		if (ec != asio::error::operation_aborted && ec != asio::error::eof &&
-			ec != asio::error::connection_reset &&
-			ec != net::ws::error::closed) {
-			return res.error();
+		// Stop heartbeat first
+		if (m_timer) {
+			m_heartbeat_running = false;
+			m_timer->cancel();
+			m_timer.reset();
 		}
-	}
+
+		// Mark as intentional closure for normal/going_away closes
+		// This prevents next_event_impl() from attempting to reconnect
+		if (reason.code == net::ws::close_code::normal ||
+			reason.code == net::ws::close_code::going_away) {
+			m_intentional_close = true;
+			m_resume_gateway_url.reset();
+			m_session.reset();
+		}
+
+		log(fmt::format("sending websocket close message | code={}, reason={}",
+						reason.code, reason.reason.data()));
+
+		net::ws::close_reason cr{
+			static_cast<net::ws::close_code>(reason.code),
+			boost::string_view{reason.reason.data(), reason.reason.size()},
+		};
+
+		m_ws->close(std::move(cr), [this, via, h = std::move(h),
+									hex = std::move(hex)](Result<> r) mutable {
+			post_completion(via, std::move(hex), std::move(h), r);
+		});
+	});
 }
 
-Result<> Shard::reconnect(const asio::yield_context &yield) {
-	asio::steady_timer t{m_strand};
-	t.expires_from_now(std::chrono::seconds(std::min(
-		static_cast<uint64_t>(std::pow(2, m_reconnect_attempts)),
-		uint64_t{128})));
-	t.async_wait(yield);
-	auto url = m_resume_gateway_url
-				   ? fmt::format("{}/{}", *m_resume_gateway_url,
-								 GATEWAY_JSON_ZLIB_QUERY)
-				   : GATEWAY_URL;
-	log(fmt::format(
-		"{}connecting to {}", m_resume_gateway_url ? "re" : "", url));
-	auto res = net::WebSocketClient::connect(url, yield);
-	if (!res) {
+void Shard::join_voice_channel_impl(
+	Snowflake guild_id, Snowflake channel_id,
+	asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex) {
+	auto via = get_executor();
+	asio::dispatch(m_strand, [this, via, guild_id, channel_id, h = std::move(h),
+							  hex = std::move(hex)]() mutable {
+		if (!m_ws) {
+			post_completion(via, std::move(hex), std::move(h),
+							Result<>{boost::system::errc::not_connected});
+			return;
+		}
+
+		nlohmann::json payload{
+			{"op", static_cast<uint8_t>(GatewayOpcode::VoiceStateUpdate)},
+			{"d",
+			 {
+				 {"guild_id", guild_id},
+				 {"channel_id", channel_id},
+				 {"self_mute", false},
+				 {"self_deaf", false},
+			 }},
+		};
 		log(fmt::format(
-				"failed to connect to {} | error={} | reconnect_attempts={}",
-				url, res.error().message(), m_reconnect_attempts),
-			LogLevel::Error);
-		++m_reconnect_attempts;
-		m_resume_gateway_url.reset();
-		return res.error();
-	}
+			"joining voice channel | guild_id={}, channel_id={}, raw={}",
+			guild_id, channel_id, payload.dump()));
 
-	m_ws.emplace(std::move(res.value()));
-	if (m_config.compression) {
-		EKIZU_TRY(auto inflater, Inflater::create());
-		m_inflater.emplace(std::move(inflater));
-	}
-	return outcome::success();
+		m_ws->send(payload.dump(), [this, via, h = std::move(h),
+									hex = std::move(hex)](Result<> r) mutable {
+			post_completion(via, std::move(hex), std::move(h), r);
+		});
+	});
 }
 
-Result<> Shard::start_heartbeat(uint32_t heartbeat_interval) {
-	if (!m_ws) { return boost::system::errc::not_connected; }
+void Shard::leave_voice_channel_impl(
+	Snowflake guild_id, asio::any_completion_handler<void(Result<>)> h,
+	CompletionExecutor hex) {
+	auto via = get_executor();
+	asio::dispatch(m_strand, [this, via, guild_id, h = std::move(h),
+							  hex = std::move(hex)]() mutable {
+		if (!m_ws) {
+			post_completion(via, std::move(hex), std::move(h),
+							Result<>{boost::system::errc::not_connected});
+			return;
+		}
 
-	// Prevent multiple heartbeat coroutines
-	if (m_heartbeat_running) {
-		if (m_timer) { m_timer->cancel(); }
-	}
+		nlohmann::json payload{
+			{"op", static_cast<uint8_t>(GatewayOpcode::VoiceStateUpdate)},
+			{"d",
+			 {
+				 {"guild_id", guild_id},
+				 {"channel_id", nullptr},
+				 {"self_mute", false},
+				 {"self_deaf", false},
+			 }},
+		};
+		log(fmt::format("leaving voice channel | guild_id={}, raw={}", guild_id,
+						payload.dump()));
+
+		m_ws->send(payload.dump(), [this, via, h = std::move(h),
+									hex = std::move(hex)](Result<> r) mutable {
+			post_completion(via, std::move(hex), std::move(h), r);
+		});
+	});
+}
+
+void Shard::update_presence_impl(UpdatePresence presence,
+								 asio::any_completion_handler<void(Result<>)> h,
+								 CompletionExecutor hex) {
+	auto via = get_executor();
+	asio::dispatch(m_strand, [this, via, presence = std::move(presence),
+							  h = std::move(h),
+							  hex = std::move(hex)]() mutable {
+		if (!m_ws) {
+			post_completion(via, std::move(hex), std::move(h),
+							Result<>{boost::system::errc::not_connected});
+			return;
+		}
+
+		nlohmann::json payload{
+			{"op", static_cast<uint8_t>(GatewayOpcode::PresenceUpdate)},
+			{"d", presence},
+		};
+		log(fmt::format("updating presence | raw={}", payload.dump()));
+
+		m_ws->send(payload.dump(), [this, via, h = std::move(h),
+									hex = std::move(hex)](Result<> r) mutable {
+			post_completion(via, std::move(hex), std::move(h), r);
+		});
+	});
+}
+
+void Shard::start_heartbeat(uint32_t heartbeat_interval) {
+	if (!m_ws) { return; }
 
 	m_heartbeat_interval = heartbeat_interval;
-	m_heartbeat_running = true;
-
 	if (!m_timer) { m_timer.emplace(m_strand); }
 
-	m_timer->expires_from_now(std::chrono::milliseconds(heartbeat_interval));
-
-	asio::spawn(
-		m_strand,
-		[this](auto yield) {
-			boost::system::error_code ec;
-			while (m_heartbeat_running) {
-				m_timer->async_wait(yield[ec]);
-				if (ec == asio::error::operation_aborted) { return; }
-				if (ec) {
-					return log(fmt::format(
-								   "failed to wait for heartbeat timer | ec={}",
-								   ec.message()),
-							   LogLevel::Error);
-				}
-
-				if (!m_ws || !m_heartbeat_running) { return; }
-
-				if (!m_last_heartbeat_acked) {
-					log("connection is failed or \"zombied\"");
-					return boost::ignore_unused(
-						close_impl(CloseFrame::SESSION_EXPIRED, yield));
-				}
-
-				m_last_heartbeat_acked = false;
-				m_timer->expires_from_now(
-					std::chrono::milliseconds(m_heartbeat_interval));
-				if (auto r = send_heartbeat(yield); !r) {
-					return log(fmt::format("failed to send heartbeat | ec={}",
-										   r.error().message()),
-							   LogLevel::Error);
-				}
-			}
-		},
-		asio::detached);
+	m_heartbeat_running = true;
 	log("started heartbeat timer");
-	return outcome::success();
+	heartbeat_tick();
 }
 
-Result<> Shard::send_heartbeat(const asio::yield_context &yield) {
-	if (!m_ws) { return boost::system::errc::not_connected; }
+void Shard::heartbeat_tick() {
+	if (!m_timer || !m_heartbeat_running) { return; }
+
+	m_timer->expires_after(std::chrono::milliseconds(m_heartbeat_interval));
+	m_timer->async_wait([this](boost::system::error_code ec) {
+		asio::dispatch(m_strand, [this, ec]() {
+			if (ec || !m_heartbeat_running) { return; }
+			if (!m_ws) { return; }
+
+			if (!m_last_heartbeat_acked) {
+				log("connection may be dead (heartbeat ack missing)",
+					LogLevel::Warn);
+
+				m_heartbeat_running = false;
+
+				// Best-effort: request close; ignore errors to preserve old
+				// behavior.
+				CompletionExecutor hex{m_strand};
+				close_impl(
+					CloseFrame::SESSION_EXPIRED,
+					[/*ignored*/](Result<> /*r*/) {}, std::move(hex));
+				return;
+			}
+
+			m_last_heartbeat_acked = false;
+			send_heartbeat_async([this](Result<> /*ignored*/) {
+				asio::dispatch(m_strand, [this]() { heartbeat_tick(); });
+			});
+		});
+	});
+}
+
+void Shard::send_heartbeat_async(
+	asio::any_completion_handler<void(Result<>)> h) {
+	if (!m_ws) {
+		std::move(h)(boost::system::errc::not_connected);
+		return;
+	}
+
 	nlohmann::json d{nullptr};
 	if (m_session) { d = m_session->sequence; }
+
 	const nlohmann::json payload{
 		{"op", static_cast<uint8_t>(GatewayOpcode::Heartbeat)},
 		{"d", d},
 	};
+
 	log(fmt::format(
 		"sending heartbeat | sequence={}",
 		m_session ? boost::to_string(m_session->sequence) : "null"));
-	return m_ws->send(payload.dump(), yield);
+
+	m_ws->send(payload.dump(), std::move(h));
 }
 
-Result<> Shard::send_identify(const asio::yield_context &yield) {
-	if (!m_ws) { return boost::system::errc::not_connected; }
+void Shard::send_identify_async(
+	asio::any_completion_handler<void(Result<>)> h) {
+	if (!m_ws) {
+		std::move(h)(boost::system::errc::not_connected);
+		return;
+	}
+
 	nlohmann::json d{
 		{"token", m_config.token},
 		{"compress", false},
@@ -454,6 +368,7 @@ Result<> Shard::send_identify(const asio::yield_context &yield) {
 			  {{"$os", "Linux"}, {"$browser", "ekizu"}, {"$device", "ekizu"}}},
 			 {"large_threshold", 250},	// NOLINT
 			 {"intents", static_cast<uint32_t>(*m_config.intents)}});
+
 	} else {
 		d.merge_patch({
 			{"client_state",
@@ -489,12 +404,20 @@ Result<> Shard::send_identify(const asio::yield_context &yield) {
 		{"op", static_cast<uint8_t>(GatewayOpcode::Identify)},
 		{"d", d},
 	};
-	return m_ws->send(payload.dump(), yield);
+
+	m_ws->send(payload.dump(), std::move(h));
 }
 
-Result<> Shard::send_resume(const asio::yield_context &yield) {
-	if (!m_ws) { return boost::system::errc::not_connected; }
-	if (!m_session) { return boost::system::errc::operation_not_permitted; }
+void Shard::send_resume_async(asio::any_completion_handler<void(Result<>)> h) {
+	if (!m_ws) {
+		std::move(h)(boost::system::errc::not_connected);
+		return;
+	}
+	if (!m_session) {
+		std::move(h)(boost::system::errc::operation_not_permitted);
+		return;
+	}
+
 	const nlohmann::json payload = {
 		{"op", static_cast<uint8_t>(GatewayOpcode::Resume)},
 		{"d",
@@ -504,9 +427,406 @@ Result<> Shard::send_resume(const asio::yield_context &yield) {
 			 {"seq", m_session->sequence},
 		 }},
 	};
+
 	log(fmt::format("sending resume | session_id={}, sequence={}",
 					m_session->id, m_session->sequence));
-	return m_ws->send(payload.dump(), yield);
+
+	m_ws->send(payload.dump(), std::move(h));
 }
 
+void Shard::reconnect_async(asio::any_completion_handler<void(Result<>)> h) {
+	// Clear intentional close flag when explicitly reconnecting
+	// This allows reconnects from RECONNECT or INVALID_SESSION opcodes
+	m_intentional_close = false;
+
+	auto t = std::make_shared<asio::steady_timer>(m_strand);
+
+	const uint64_t backoff =
+		std::min(static_cast<uint64_t>(std::pow(2, m_reconnect_attempts)),
+				 uint64_t{128});
+	t->expires_after(std::chrono::seconds(backoff));
+
+	t->async_wait([this, t,
+				   h = std::move(h)](boost::system::error_code ec) mutable {
+		asio::dispatch(m_strand, [this, ec, h = std::move(h)]() mutable {
+			if (ec) {
+				std::move(h)(ec);
+				return;
+			}
+
+			auto url = m_resume_gateway_url
+						   ? fmt::format("{}/{}", *m_resume_gateway_url,
+										 GATEWAY_JSON_ZLIB_QUERY)
+						   : GATEWAY_URL;
+			log(fmt::format(
+				"{}connecting to {}", m_resume_gateway_url ? "re" : "", url));
+
+			net::WebSocketClient::connect(
+				m_strand.get_inner_executor(), url,
+				[this, h = std::move(h)](
+					Result<net::WebSocketClient> ws_res) mutable {
+					asio::dispatch(m_strand, [this, ws_res = std::move(ws_res),
+											  h = std::move(h)]() mutable {
+						if (!ws_res) {
+							log(fmt::format(
+									"failed to connect to {} | error={} | "
+									"reconnect_attempts={}",
+									m_resume_gateway_url
+										? fmt::format(
+											  "{}/{}", *m_resume_gateway_url,
+											  GATEWAY_JSON_ZLIB_QUERY)
+										: std::string(GATEWAY_URL),
+									ws_res.error().message(),
+									m_reconnect_attempts),
+								LogLevel::Error);
+							++m_reconnect_attempts;
+							m_resume_gateway_url.reset();
+							std::move(h)(ws_res.error());
+							return;
+						}
+
+						m_ws.emplace(std::move(ws_res.value()));
+
+						if (m_config.compression) {
+							auto inflater_res = Inflater::create();
+							if (!inflater_res) {
+								std::move(h)(inflater_res.error());
+								return;
+							}
+							m_inflater.emplace(std::move(inflater_res.value()));
+						}
+
+						std::move(h)(outcome::success());
+					});
+				});
+		});
+	});
+}
+
+void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
+							CompletionExecutor hex) {
+	auto via = get_executor();
+	asio::dispatch(m_strand, [this, via, h = std::move(h),
+							  hex = std::move(hex)]() mutable {
+		struct Op : std::enable_shared_from_this<Op> {
+			Shard *self;
+			asio::any_io_executor via;
+			asio::any_completion_handler<void(Result<Event>)> h;
+			CompletionExecutor hex;
+
+			explicit Op(
+				Shard *s, asio::any_io_executor v,
+				asio::any_completion_handler<void(Result<Event>)> handler,
+				CompletionExecutor handler_ex)
+				: self(s),
+				  via(std::move(v)),
+				  h(std::move(handler)),
+				  hex(std::move(handler_ex)) {}
+
+			void complete(Result<Event> r) {
+				post_completion(
+					std::move(via), std::move(hex), std::move(h), std::move(r));
+			}
+
+			void start() { ensure_connected_then_read(); }
+
+			void ensure_connected_then_read() {
+				// Strand-only.
+				if (!self->m_ws || !self->m_ws->is_open()) {
+					// Don't reconnect if we intentionally closed.
+					if (self->m_intentional_close) {
+						self->log(
+							"connection closed intentionally, "
+							"not "
+							"reconnecting");
+						complete(boost::system::errc::not_connected);
+						return;
+					}
+
+					self->reconnect_async([me = this->shared_from_this()](
+											  Result<> r) mutable {
+						asio::dispatch(me->self->m_strand, [me, r]() mutable {
+							if (!r) {
+								me->complete(r.error());
+								return;
+							}
+							me->read_one();
+						});
+					});
+					return;
+				}
+
+				read_one();
+			}
+
+			void read_one() {
+				// Strand-only.
+				if (!self->m_ws) {
+					complete(boost::system::errc::not_connected);
+					return;
+				}
+
+				self->m_ws->read([me = this->shared_from_this()](
+									 Result<net::WebSocketMessage> rr) mutable {
+					asio::dispatch(
+						me->self->m_strand, [me, rr = std::move(rr)]() mutable {
+							if (!rr) {
+								me->on_read_error(rr.error());
+								return;
+							}
+							me->on_message(std::move(rr.value()));
+						});
+				});
+			}
+
+			void on_read_error(const boost::system::error_code &ec) {
+				// Strand-only.
+				if (self->m_ws && self->m_ws->close_reason()) {
+					self->log(
+						fmt::format("read error | ec={}, msg={}, "
+									"close_reason={{code={}, reason={}}}",
+									ec.value(), ec.message(),
+									self->m_ws->close_reason()->code,
+									self->m_ws->close_reason()->reason.data()),
+						LogLevel::Error);
+
+				} else {
+					self->log(fmt::format("read error | ec={}, msg={}",
+										  ec.value(), ec.message()),
+							  LogLevel::Error);
+				}
+
+				// If we intentionally closed, don't attempt to reconnect.
+				if (self->m_intentional_close) {
+					self->log(
+						"connection error after intentional close, "
+						"not "
+						"reconnecting");
+					complete(ec);
+					return;
+				}
+
+				// Only reconnect on specific transient errors; otherwise
+				// surface it.
+				if (!is_transient_read_error(ec)) {
+					complete(ec);
+					return;
+				}
+
+				// Retry (will reconnect if needed).
+				ensure_connected_then_read();
+			}
+
+			void on_message(net::WebSocketMessage msg) {
+				// Strand-only.
+				if (self->m_inflater && msg.is_binary) {
+					auto inflated = self->m_inflater->inflate(msg.payload);
+					if (!inflated) {
+						complete(inflated.error());
+						return;
+					}
+					msg.payload = std::move(inflated.value());
+				}
+
+				handle_gateway_payload(msg.payload);
+			}
+
+			void handle_gateway_payload(std::string_view data) {
+				// Strand-only.
+				const auto json = nlohmann::json::parse(data, nullptr, false);
+				if (json.is_discarded() || !json.contains("op") ||
+					!json["op"].is_number()) {
+					complete(boost::system::errc::invalid_argument);
+					return;
+				}
+
+				switch (static_cast<GatewayOpcode>(json["op"].get<uint8_t>())) {
+					case GatewayOpcode::Dispatch: {
+						if (!json.contains("t") || !json["t"].is_string() ||
+							!json.contains("d") || !json["d"].is_object()) {
+							complete(boost::system::errc::invalid_argument);
+							return;
+						}
+
+						std::optional<uint64_t> sequence;
+						if (json.contains("s") && json["s"].is_number()) {
+							sequence = json["s"];
+						}
+
+						const std::string event_type = json["t"];
+						const auto &event = json["d"];
+
+						self->log(fmt::format(
+							"received dispatch {{t: {}, s: {}, d: {}}}",
+							event_type,
+							sequence ? boost::to_string(*sequence) : "null",
+							event.dump()));
+
+						if (event_type == "READY") {
+							if (!event.contains("resume_gateway_"
+												"ur"
+												"l") ||
+								!event["resume_gateway_url"].is_string() ||
+								!event.contains("session_"
+												"i"
+												"d") ||
+								!event["session_id"].is_string()) {
+								complete(boost::system::errc::invalid_argument);
+								return;
+							}
+
+							self->m_session.emplace(
+								event["session_id"].get<std::string>(),
+								sequence.value_or(0));
+							self->m_resume_gateway_url =
+								event["resume_gateway_url"].get<std::string>();
+
+							self->log(fmt::format(
+								"received ready | resume_gateway_url={}, "
+								"session_id={}",
+								*self->m_resume_gateway_url,
+								self->m_session->id));
+						}
+
+						if (self->m_session && sequence) {
+							// TODO: Handle out of order sequences.
+							self->m_session->sequence = *sequence;
+						}
+
+						complete(event_from_str(event_type, event));
+						return;
+					}
+
+					case GatewayOpcode::Heartbeat: {
+						// [https://discord.com/developers/docs/topics/gateway#heartbeat-requests](https://discord.com/developers/docs/topics/gateway#heartbeat-requests)
+						self->send_heartbeat_async(
+							[me =
+								 this->shared_from_this()](Result<> r) mutable {
+								asio::dispatch(
+									me->self->m_strand, [me, r]() mutable {
+										if (!r) {
+											me->complete(r.error());
+											return;
+										}
+										me->complete(
+											boost::system::error_code{});
+									});
+							});
+						return;
+					}
+
+					case GatewayOpcode::Reconnect: {
+						self->log("received reconnect");
+						self->close_impl(
+							CloseFrame::RESUME,
+							[me =
+								 this->shared_from_this()](Result<> r) mutable {
+								asio::dispatch(
+									me->self->m_strand, [me, r]() mutable {
+										if (!r) {
+											me->complete(r.error());
+											return;
+										}
+										me->complete(
+											boost::system::error_code{});
+									});
+							},
+							self->m_strand);
+						return;
+					}
+
+					case GatewayOpcode::InvalidSession: {
+						if (!json.contains("d") || !json["d"].is_boolean()) {
+							complete(boost::system::errc::invalid_argument);
+							return;
+						}
+
+						const bool resumable = json["d"];
+						self->log(fmt::format(
+							"received invalid session | resumable={}",
+							resumable));
+
+						self->close_impl(
+							resumable ? CloseFrame::RESUME : CloseFrame::NORMAL,
+							[me =
+								 this->shared_from_this()](Result<> r) mutable {
+								asio::dispatch(
+									me->self->m_strand, [me, r]() mutable {
+										if (!r) {
+											me->complete(r.error());
+											return;
+										}
+										me->complete(
+											boost::system::error_code{});
+									});
+							},
+							self->m_strand);
+						return;
+					}
+
+					case GatewayOpcode::Hello: {
+						self->m_last_heartbeat_acked = true;
+
+						if (!json.contains("d")) {
+							complete(boost::system::errc::invalid_argument);
+							return;
+						}
+						const auto &hello = json["d"];
+						if (!hello.contains("heartbeat_"
+											"interva"
+											"l") ||
+							!hello["heartbeat_interval"].is_number_unsigned()) {
+							complete(boost::system::errc::invalid_argument);
+							return;
+						}
+
+						const uint32_t heartbeat_interval =
+							hello["heartbeat_interval"];
+						self->log(fmt::format(
+							"received hello | heartbeat_interval={}",
+							heartbeat_interval));
+
+						self->start_heartbeat(heartbeat_interval);
+
+						auto after_ident = [me = this->shared_from_this()](
+											   Result<> r) mutable {
+							asio::dispatch(
+								me->self->m_strand, [me, r]() mutable {
+									if (!r) {
+										me->complete(r.error());
+										return;
+									}
+									me->complete(boost::system::error_code{});
+								});
+						};
+
+						if (self->m_session) {
+							self->send_resume_async(std::move(after_ident));
+
+						} else {
+							self->send_identify_async(std::move(after_ident));
+						}
+						return;
+					}
+
+					case GatewayOpcode::HeartbeatAck: {
+						self->m_last_heartbeat_acked = true;
+						self->log("received heartbeat ack");
+						complete(boost::system::error_code{});
+						return;
+					}
+
+					default: {
+						// Not a failure, but not a dispatch event either.
+						complete(boost::system::error_code{});
+						return;
+					}
+				}
+			}
+		};
+
+		std::make_shared<Op>(this, std::move(via), std::move(h), std::move(hex))
+			->start();
+	});
+}
 }  // namespace ekizu

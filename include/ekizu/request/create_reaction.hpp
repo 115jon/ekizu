@@ -3,6 +3,7 @@
 
 #include <ekizu/emoji.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct CustomEmoji {
@@ -13,22 +14,37 @@ struct CustomEmoji {
 using RequestReaction = std::variant<CustomEmoji, std::string>;
 
 struct CreateReaction {
-	CreateReaction(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake channel_id, Snowflake message_id, RequestReaction emoji);
+	CreateReaction(RequestSender sender, Snowflake channel_id,
+				   Snowflake message_id, RequestReaction emoji);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	EKIZU_EXPORT Result<> send(const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this](auto &&handler) {
+				m_sender.send(
+					*this, [h = std::forward<decltype(handler)>(handler)](
+							   Result<net::HttpResponse> res) mutable {
+						if (!res) { return std::move(h)(res.error()); }
+
+						if (res.value().result() !=
+							net::HttpStatus::no_content) {
+							return std::move(h)(
+								boost::system::errc::operation_not_permitted);
+						}
+
+						std::move(h)(outcome::success());
+					});
+			},
+			token);
+	}
 
    private:
 	Snowflake m_channel_id;
 	RequestReaction m_emoji;
 	Snowflake m_message_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 #endif	// EKIZU_REQUEST_CREATE_REACTION_HPP

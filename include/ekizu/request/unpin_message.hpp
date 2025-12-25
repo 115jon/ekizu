@@ -2,6 +2,7 @@
 #define EKIZU_REQUEST_UNPIN_MESSAGE_HPP
 
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 #include <ekizu/snowflake.hpp>
 
 namespace ekizu {
@@ -9,32 +10,41 @@ namespace ekizu {
  * @brief Represents the Unpin Message REST API endpoint.
  */
 struct UnpinMessage {
-	UnpinMessage(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake channel_id, Snowflake message_id);
+	UnpinMessage(RequestSender sender, Snowflake channel_id,
+				 Snowflake message_id);
 
 	/**
 	 * @brief Converts the UnpinMessage to an HTTP request.
 	 *
 	 * @return The HTTP request.
 	 */
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	/**
-	 * @brief Sends the UnpinMessage request.
-	 *
-	 * @return The result of the request as an HTTP response.
-	 */
-	[[nodiscard]] EKIZU_EXPORT Result<> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this](auto &&handler) {
+				m_sender.send(
+					*this, [h = std::forward<decltype(handler)>(handler)](
+							   Result<net::HttpResponse> res) mutable {
+						if (!res) { return std::move(h)(res.error()); }
+
+						if (res.value().result() !=
+							net::HttpStatus::no_content) {
+							return std::move(h)(
+								boost::system::errc::operation_not_permitted);
+						}
+
+						std::move(h)(outcome::success());
+					});
+			},
+			token);
+	}
 
    private:
 	Snowflake m_channel_id;
 	Snowflake m_message_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

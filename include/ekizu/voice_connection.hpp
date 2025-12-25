@@ -1,20 +1,33 @@
 #ifndef EKIZU_VOICE_CONNECTION_HPP
 #define EKIZU_VOICE_CONNECTION_HPP
 
+#include <array>
+#include <boost/asio/any_completion_executor.hpp>
+#include <boost/asio/any_completion_handler.hpp>
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/associated_executor.hpp>
 #include <boost/asio/experimental/channel.hpp>
-#include <boost/asio/steady_timer.hpp>
+#include <boost/core/span.hpp>
+#include <cstdint>
+#include <ekizu/export.hpp>
 #include <ekizu/log.hpp>
-#include <ekizu/udp.hpp>
+#include <ekizu/result.hpp>
 #include <ekizu/voice_state.hpp>
-#include <ekizu/ws.hpp>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace ekizu {
+namespace asio = boost::asio;
+
 /// An RTP packet the server send to the client containing the voice data.
 struct Packet {
-	std::array<uint8_t, 2> type;
-	uint16_t sequence;
-	uint32_t timestamp;
-	uint32_t ssrc;
+	std::array<std::byte, 2> type{};
+	uint16_t sequence{};
+	uint32_t timestamp{};
+	uint32_t ssrc{};
 	std::vector<std::byte> opus;
 };
 
@@ -26,100 +39,217 @@ enum class SpeakerFlag : uint8_t {
 };
 
 enum class VoiceOpcode : uint8_t {
-	Identify = 0,			 // client
-	SelectProtocol = 1,		 // client
-	Ready = 2,				 // server
-	Heartbeat = 3,			 // client
-	SessionDescription = 4,	 // server
-	Speaking = 5,			 // client and server
-	HeartbeatAck = 6,		 // server
-	Resume = 7,				 // client
-	Hello = 8,				 // server
-	Resumed = 9,			 // server
-	ClientDisconnect = 13,	 // server
+	Identify = 0,
+	SelectProtocol = 1,
+	Ready = 2,
+	Heartbeat = 3,
+	SessionDescription = 4,
+	Speaking = 5,
+	HeartbeatAck = 6,
+	Resume = 7,
+	Hello = 8,
+	Resumed = 9,
+	ClientsConnect = 11,
+	ClientDisconnect = 13,
+	DavePrepareTransition = 21,
+	DaveExecuteTransition = 22,
+	DaveTransitionReady = 23,
+	DavePrepareEpoch = 24,
+	DaveMlsExternalSender = 25,
+	DaveMlsKeyPackage = 26,
+	DaveMlsProposals = 27,
+	DaveMlsCommitWelcome = 28,
+	DaveMlsAnnounceCommitTransition = 29,
+	DaveMlsWelcome = 30,
+	DaveMlsInvalidCommitWelcome = 31,
 };
 
+struct VoiceConnectionConfig;
+
 struct VoiceConnection {
+	using CompletionExecutor = asio::any_completion_executor;
+
 	VoiceConnection(const VoiceConnection &) = delete;
 	VoiceConnection &operator=(const VoiceConnection &) = delete;
-	EKIZU_EXPORT VoiceConnection(VoiceConnection &&) noexcept(false);
-	VoiceConnection &operator=(VoiceConnection &&) noexcept = delete;
+
+	EKIZU_EXPORT VoiceConnection(VoiceConnection &&) noexcept;
+	EKIZU_EXPORT VoiceConnection &operator=(VoiceConnection &&) noexcept;
 	EKIZU_EXPORT ~VoiceConnection();
 
-	std::optional<
+	EKIZU_EXPORT std::optional<
 		asio::experimental::channel<void(boost::system::error_code, Packet)>> &
-	recv_chan() {
-		return m_recv_chan;
+	recv_chan();
+
+	EKIZU_EXPORT void attach_logger(std::function<void(const Log &)> on_log);
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto close(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex](auto &&handler) mutable {
+				close_impl(
+					asio::any_completion_handler<void(Result<>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, ex));
+			},
+			token);
 	}
 
-	EKIZU_EXPORT void attach_logger(std::function<void(Log)> on_log);
-	EKIZU_EXPORT Result<> close(const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> reconnect(const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> run(const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> send_opus(boost::span<const std::byte> data,
-									const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> send_raw(boost::span<const std::byte> data,
-								   const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> silence(const asio::yield_context &yield);
-	EKIZU_EXPORT Result<> speak(SpeakerFlag flags,
-								const asio::yield_context &yield);
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto reconnect(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex](auto &&handler) mutable {
+				reconnect_impl(
+					asio::any_completion_handler<void(Result<>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto run(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex](auto &&handler) mutable {
+				run_impl(
+					asio::any_completion_handler<void(Result<>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send_opus(boost::span<const std::byte> data, CompletionToken &&token) {
+		auto ex = get_executor();
+		std::vector<std::byte> copy(data.begin(), data.end());
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex, copy = std::move(copy)](auto &&handler) mutable {
+				send_opus_impl(std::move(copy),
+							   asio::any_completion_handler<void(Result<>)>{
+								   std::forward<decltype(handler)>(handler)},
+							   asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto send_raw(boost::span<const int16_t> data, CompletionToken &&token) {
+		auto ex = get_executor();
+		std::vector<int16_t> copy(data.begin(), data.end());
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex, copy = std::move(copy)](auto &&handler) mutable {
+				send_raw_impl(std::move(copy),
+							  asio::any_completion_handler<void(Result<>)>{
+								  std::forward<decltype(handler)>(handler)},
+							  asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto silence(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex](auto &&handler) mutable {
+				silence_impl(
+					asio::any_completion_handler<void(Result<>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto speak(SpeakerFlag flags, CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex, flags](auto &&handler) mutable {
+				speak_impl(flags,
+						   asio::any_completion_handler<void(Result<>)>{
+							   std::forward<decltype(handler)>(handler)},
+						   asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
+	auto flush(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken, void(Result<>)>(
+			[this, ex](auto &&handler) mutable {
+				flush_impl(
+					asio::any_completion_handler<void(Result<>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, ex));
+			},
+			token);
+	}
+
+	EKIZU_EXPORT void request_stop();
 
    private:
 	friend struct VoiceConnectionConfig;
-	struct Codec;
 
-	VoiceConnection(net::WebSocketClient ws, VoiceState state, std::string url,
-					std::string_view token, std::unique_ptr<Codec> codec);
+	struct Impl;
+	EKIZU_EXPORT explicit VoiceConnection(std::shared_ptr<Impl> impl);
 
-	Result<> handle_session_description(const nlohmann::json &data,
-										const asio::yield_context &yield);
-	Result<> setup_heartbeat(const nlohmann::json &data,
-							 const asio::yield_context &yield);
-	Result<> send_heartbeat(const asio::yield_context &yield);
-	Result<> opus_receiver(const asio::yield_context &yield);
-	Result<> opus_sender(const asio::yield_context &yield);
-	Result<> setup_udp(const nlohmann::json &data,
-					   const asio::yield_context &yield);
-	Result<> ws_listen(const asio::yield_context &yield);
-	void log(std::string_view msg, LogLevel level = LogLevel::Debug) const;
+	EKIZU_EXPORT void close_impl(asio::any_completion_handler<void(Result<>)> h,
+								 CompletionExecutor hex);
+	EKIZU_EXPORT void reconnect_impl(
+		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
+	EKIZU_EXPORT void run_impl(asio::any_completion_handler<void(Result<>)> h,
+							   CompletionExecutor hex);
 
-	struct AudioPacket {
-		std::vector<std::byte> encoded{};
-		size_t frame_count{};
-	};
+	EKIZU_EXPORT void send_opus_impl(
+		std::vector<std::byte> data,
+		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
+	EKIZU_EXPORT void send_raw_impl(
+		std::vector<int16_t> data,
+		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
+	EKIZU_EXPORT void silence_impl(
+		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
+	EKIZU_EXPORT void speak_impl(SpeakerFlag flags,
+								 asio::any_completion_handler<void(Result<>)> h,
+								 CompletionExecutor hex);
+	EKIZU_EXPORT void flush_impl(asio::any_completion_handler<void(Result<>)> h,
+								 CompletionExecutor hex);
 
-	std::optional<net::WebSocketClient> m_ws;
-	VoiceState m_state;
-	std::string m_url;
-	std::string m_token;
-	std::optional<asio::experimental::channel<void(
-		boost::system::error_code, AudioPacket)>>
-		m_channel;
-	std::optional<asio::experimental::channel<void(
-		boost::system::error_code, boost::blank)>>
-		m_ready_chan;
-	std::optional<
-		asio::experimental::channel<void(boost::system::error_code, Packet)>>
-		m_recv_chan;
-	std::optional<asio::steady_timer> m_heartbeat_timer;
-	bool m_last_heartbeat_acked{true};
-	uint32_t m_ssrc{};
-	std::optional<net::UdpClient> m_udp;
-	std::array<uint8_t, 32> m_secret_key{};
-	std::unique_ptr<Codec> m_codec;
-	bool m_disconnected{};
-	bool m_speaking{};
-	std::function<void(Log)> m_on_log;
-	std::optional<asio::steady_timer> m_send_timer;
+	[[nodiscard]] EKIZU_EXPORT asio::any_io_executor get_executor() const;
+
+	std::shared_ptr<Impl> m_impl;
 };
 
 struct VoiceConnectionConfig {
-	[[nodiscard]] EKIZU_EXPORT Result<VoiceConnection> connect(
-		const asio::yield_context &yield) const;
+	using CompletionExecutor = asio::any_completion_executor;
 
-	std::optional<VoiceState> state{};
-	std::optional<std::string> endpoint{};
-	std::optional<std::string> token{};
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<VoiceConnection>))
+				  CompletionToken>
+	[[nodiscard]] auto connect(asio::any_io_executor executor,
+							   CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<VoiceConnection>)>(
+			[this, executor](auto &&handler) mutable {
+				connect_impl(
+					executor,
+					asio::any_completion_handler<void(Result<VoiceConnection>)>{
+						std::forward<decltype(handler)>(handler)},
+					asio::get_associated_executor(handler, executor));
+			},
+			token);
+	}
+
+	std::optional<VoiceState> state;
+	std::optional<std::string> endpoint;
+	std::optional<std::string> token;
+
+   private:
+	EKIZU_EXPORT void connect_impl(
+		asio::any_io_executor executor,
+		asio::any_completion_handler<void(Result<VoiceConnection>)> h,
+		CompletionExecutor hex) const;
 };
 }  // namespace ekizu
 

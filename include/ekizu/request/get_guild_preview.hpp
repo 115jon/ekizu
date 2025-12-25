@@ -3,31 +3,29 @@
 
 #include <ekizu/guild_preview.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct GetGuildPreview {
-	GetGuildPreview(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	GetGuildPreview(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	// Add any additional parameters and methods specific to this route
-	// For example:
-	// GetGuildPreview &some_new_method(NewType new_param) {
-	//     m_fields.new_param = new_param;
-	//     return *this;
-	// }
-
-	[[nodiscard]] EKIZU_EXPORT Result<GuildPreview> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<GuildPreview>))
+				  CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<GuildPreview>)>(
+			[this](auto &&handler) {
+				m_sender.send<GuildPreview>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

@@ -8,11 +8,9 @@ void to_json(nlohmann::json &j, const ModifyCurrentMemberFields &m) {
 	serialize(j, "nick", m.nick);
 }
 
-ModifyCurrentMember::ModifyCurrentMember(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request,
-	Snowflake guild_id)
-	: m_guild_id{guild_id}, m_make_request{make_request} {}
+ModifyCurrentMember::ModifyCurrentMember(RequestSender sender,
+										 Snowflake guild_id)
+	: m_guild_id{guild_id}, m_sender{sender} {}
 
 ModifyCurrentMember::operator net::HttpRequest() const {
 	net::HttpRequest req{net::HttpMethod::patch,
@@ -23,16 +21,5 @@ ModifyCurrentMember::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<GuildMember> ModifyCurrentMember::send(
-	const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<GuildMember>(res.body());
 }
 }  // namespace ekizu

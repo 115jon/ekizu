@@ -1,10 +1,9 @@
 #ifndef EKIZU_INFLATER_HPP
 #define EKIZU_INFLATER_HPP
 
-#include <ekizu/export.h>
-
 #include <boost/core/span.hpp>
-#include <ekizu/util.hpp>
+#include <ekizu/export.hpp>
+#include <ekizu/result.hpp>
 #include <memory>
 
 namespace ekizu {

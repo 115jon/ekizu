@@ -1,0 +1,126 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 5e6a5b4..b90f1a6 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -131,7 +131,15 @@ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src
+ # Warning: this will fail once nlohman_json stops being header-only!
+ get_target_property(JSON_INCLUDE_INTERFACE nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
+ 
+-add_library(${LIB_NAME} ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${LIB_NAME} bytes tls_syntax hpke)
+ target_link_libraries(${LIB_NAME} 
+   PUBLIC
+diff --git a/lib/bytes/CMakeLists.txt b/lib/bytes/CMakeLists.txt
+index 556e84f..84b724e 100644
+--- a/lib/bytes/CMakeLists.txt
++++ b/lib/bytes/CMakeLists.txt
+@@ -8,7 +8,15 @@ file(GLOB_RECURSE LIB_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/inc
+ file(GLOB_RECURSE LIB_GENERATED_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+ 
+-add_library(${CURRENT_LIB_NAME} ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${CURRENT_LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${CURRENT_LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${CURRENT_LIB_NAME} tls_syntax)
+ target_link_libraries(${CURRENT_LIB_NAME} tls_syntax)
+ target_include_directories(${CURRENT_LIB_NAME}
+diff --git a/lib/hpke/CMakeLists.txt b/lib/hpke/CMakeLists.txt
+index 1c8dbca..045219a 100644
+--- a/lib/hpke/CMakeLists.txt
++++ b/lib/hpke/CMakeLists.txt
+@@ -7,7 +7,15 @@ set(CURRENT_LIB_NAME hpke)
+ file(GLOB_RECURSE LIB_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_GENERATED_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+-add_library(${CURRENT_LIB_NAME} ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${CURRENT_LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${CURRENT_LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${CURRENT_LIB_NAME} bytes tls_syntax)
+ 
+ ###
+diff --git a/lib/mls_ds/CMakeLists.txt b/lib/mls_ds/CMakeLists.txt
+index b644063..dea938c 100644
+--- a/lib/mls_ds/CMakeLists.txt
++++ b/lib/mls_ds/CMakeLists.txt
+@@ -7,7 +7,15 @@ set(CURRENT_LIB_NAME mls_ds)
+ file(GLOB_RECURSE LIB_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+ 
+-add_library(${CURRENT_LIB_NAME} ${LIB_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${CURRENT_LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${CURRENT_LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${CURRENT_LIB_NAME} mlspp)
+ target_link_libraries(${CURRENT_LIB_NAME} mlspp bytes tls_syntax)
+ target_include_directories(${CURRENT_LIB_NAME}
+diff --git a/lib/mls_vectors/CMakeLists.txt b/lib/mls_vectors/CMakeLists.txt
+index dedac26..bd6af48 100644
+--- a/lib/mls_vectors/CMakeLists.txt
++++ b/lib/mls_vectors/CMakeLists.txt
+@@ -8,7 +8,15 @@ file(GLOB_RECURSE LIB_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/inc
+ file(GLOB_RECURSE LIB_GENERATED_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+ 
+-add_library(${CURRENT_LIB_NAME} ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${CURRENT_LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${CURRENT_LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${CURRENT_LIB_NAME} mlspp)
+ target_link_libraries(${CURRENT_LIB_NAME} mlspp bytes tls_syntax)
+ target_include_directories(${CURRENT_LIB_NAME}
+diff --git a/lib/tls_syntax/CMakeLists.txt b/lib/tls_syntax/CMakeLists.txt
+index 893d8e8..cbf438c 100644
+--- a/lib/tls_syntax/CMakeLists.txt
++++ b/lib/tls_syntax/CMakeLists.txt
+@@ -8,7 +8,15 @@ file(GLOB_RECURSE LIB_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/inc
+ file(GLOB_RECURSE LIB_GENERATED_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/include/*.h")
+ file(GLOB_RECURSE LIB_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+ 
+-add_library(${CURRENT_LIB_NAME} ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES})
++if (WIN32)
++    add_library(${CURRENT_LIB_NAME} STATIC
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++else()
++    add_library(${CURRENT_LIB_NAME}
++        ${LIB_HEADERS} ${LIB_GENERATED_HEADERS} ${LIB_SOURCES}
++    )
++endif()
+ add_dependencies(${CURRENT_LIB_NAME} third_party)
+ target_link_libraries(${CURRENT_LIB_NAME} PUBLIC third_party)
+ target_include_directories(${CURRENT_LIB_NAME}

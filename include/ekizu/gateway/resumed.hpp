@@ -1,8 +1,7 @@
 #ifndef EKIZU_GATEWAY_RESUMED_HPP
 #define EKIZU_GATEWAY_RESUMED_HPP
 
-#include <ekizu/export.h>
-
+#include <ekizu/export.hpp>
 #include <nlohmann/json_fwd.hpp>
 
 namespace ekizu {

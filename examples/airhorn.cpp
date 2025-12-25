@@ -1,4 +1,5 @@
 #include <boost/asio/experimental/channel.hpp>
+#include <boost/endian/conversion.hpp>
 #include <ekizu/async_main.hpp>
 #include <ekizu/http_client.hpp>
 #include <ekizu/lru_cache.hpp>
@@ -72,7 +73,7 @@ Result<> load_sound() {
 
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
-	HttpClient http{token};
+	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	EKIZU_TRY(load_sound());
@@ -188,6 +189,11 @@ Result<> handle_event(const Event &ev, const HttpClient &http, Shard &shard,
 						auto res = start_voice_connection(*config, y, shard);
 
 						if (!res) {
+							auto ec = res.error();
+							fmt::println(
+								stderr, "ec: {} (value={}, category={})",
+								ec.message(), ec.value(), ec.category().name());
+
 							fmt::println(
 								stderr, "Failed to start voice connection: {}",
 								res.error().message());
@@ -204,12 +210,13 @@ Result<> handle_event(const Event &ev, const HttpClient &http, Shard &shard,
 Result<> start_voice_connection(const VoiceConnectionConfig &config,
 								const asio::yield_context &yield,
 								Shard &shard) {
-	EKIZU_TRY(auto conn, config.connect(yield));
+	EKIZU_TRY(auto conn, config.connect(yield.get_executor(), yield));
 
 	// Runs/Waits until its ready to start sending/receiving audio.
 	EKIZU_TRY(conn.run(yield));
 	EKIZU_TRY(conn.speak(SpeakerFlag::Microphone, yield));
 	for (const auto &s : samples) { EKIZU_TRY(conn.send_opus(s, yield)); }
+	EKIZU_TRY(conn.flush(yield));
 	EKIZU_TRY(conn.speak(SpeakerFlag::None, yield));
 	EKIZU_TRY(shard.leave_voice_channel(*config.state->guild_id, yield));
 	EKIZU_TRY(conn.close(yield));

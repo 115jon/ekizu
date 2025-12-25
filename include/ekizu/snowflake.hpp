@@ -1,10 +1,10 @@
 #ifndef EKIZU_SNOWFLAKE_HPP
 #define EKIZU_SNOWFLAKE_HPP
 
-#include <ekizu/export.h>
 #include <fmt/core.h>
 
-#include <ekizu/util.hpp>
+#include <ekizu/export.hpp>
+#include <ekizu/result.hpp>
 #include <nlohmann/json_fwd.hpp>
 
 namespace ekizu {

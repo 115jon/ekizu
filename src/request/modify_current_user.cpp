@@ -1,4 +1,3 @@
-#include <ekizu/json_util.hpp>
 #include <ekizu/request/modify_current_user.hpp>
 
 namespace ekizu {
@@ -15,10 +14,7 @@ void from_json(const nlohmann::json &j, ModifyCurrentUserFields &f) {
 	deserialize(j, "username", f.username);
 }
 
-ModifyCurrentUser::ModifyCurrentUser(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)> &make_request)
-	: m_make_request{make_request} {}
+ModifyCurrentUser::ModifyCurrentUser(RequestSender sender) : m_sender{sender} {}
 
 ModifyCurrentUser::operator net::HttpRequest() const {
 	net::HttpRequest req{net::HttpMethod::patch, "/users/@me", 11,
@@ -28,15 +24,5 @@ ModifyCurrentUser::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<User> ModifyCurrentUser::send(const asio::yield_context &yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<User>(res.body());
 }
 }  // namespace ekizu

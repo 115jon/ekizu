@@ -40,7 +40,7 @@ async_main(const asio::yield_context &yield) {
 	}
 
 	Snowflake bot_id;
-	HttpClient http{token};
+	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
 	// Attach logger to shard.
@@ -56,17 +56,6 @@ async_main(const asio::yield_context &yield) {
 			case LogLevel::Critical: return get_logger()->critical(msg);
 		}
 	});
-
-	// Close the shard after 5 seconds. Will reconnect automatically.
-	asio::spawn(
-		yield,
-		[&shard](auto y) {
-			asio::steady_timer timer{y.get_executor(), std::chrono::seconds(5)};
-			timer.async_wait(y);
-			get_logger()->info("Shutting down");
-			(void)shard.close(CloseFrame::NORMAL, y);
-		},
-		asio::detached);
 
 	while (true) {
 		auto res = shard.next_event(yield);

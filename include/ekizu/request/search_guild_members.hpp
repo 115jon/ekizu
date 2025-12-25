@@ -3,6 +3,7 @@
 
 #include <ekizu/guild_member.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
 struct SearchGuildMembersFields {
@@ -11,12 +12,9 @@ struct SearchGuildMembersFields {
 };
 
 struct SearchGuildMembers {
-	SearchGuildMembers(
-		const std::function<Result<net::HttpResponse>(
-			net::HttpRequest, const asio::yield_context &)> &make_request,
-		Snowflake guild_id);
+	SearchGuildMembers(RequestSender sender, Snowflake guild_id);
 
-	operator net::HttpRequest() const;
+	EKIZU_EXPORT operator net::HttpRequest() const;
 
 	SearchGuildMembers &query(std::string_view query) {
 		m_fields.query = query;
@@ -28,15 +26,22 @@ struct SearchGuildMembers {
 		return *this;
 	}
 
-	EKIZU_EXPORT Result<std::vector<GuildMember>> send(
-		const asio::yield_context &yield) const;
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(
+		void(Result<std::vector<GuildMember>>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<std::vector<GuildMember>>)>(
+			[this](auto &&handler) {
+				m_sender.send<std::vector<GuildMember>>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
    private:
 	Snowflake m_guild_id;
 	SearchGuildMembersFields m_fields;
-	std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context &)>
-		m_make_request;
+	RequestSender m_sender;
 };
 }  // namespace ekizu
 

@@ -5,7 +5,7 @@ namespace ekizu {
 using json_util::deserialize;
 using json_util::serialize;
 
-void to_json(nlohmann::json& j, const ModifyChannelFields& f) {
+void to_json(nlohmann::json &j, const ModifyChannelFields &f) {
 	serialize(j, "name", f.name);
 	serialize(j, "type", f.type);
 	serialize(j, "position", f.position);
@@ -27,7 +27,7 @@ void to_json(nlohmann::json& j, const ModifyChannelFields& f) {
 	serialize(j, "default_forum_layout", f.default_forum_layout);
 }
 
-void from_json(const nlohmann::json& j, ModifyChannelFields& f) {
+void from_json(const nlohmann::json &j, ModifyChannelFields &f) {
 	deserialize(j, "name", f.name);
 	deserialize(j, "type", f.type);
 	deserialize(j, "position", f.position);
@@ -49,11 +49,8 @@ void from_json(const nlohmann::json& j, ModifyChannelFields& f) {
 	deserialize(j, "default_forum_layout", f.default_forum_layout);
 }
 
-ModifyChannel::ModifyChannel(
-	const std::function<Result<net::HttpResponse>(
-		net::HttpRequest, const asio::yield_context&)>& make_request,
-	Snowflake channel_id)
-	: m_channel_id{channel_id}, m_make_request{make_request} {}
+ModifyChannel::ModifyChannel(RequestSender sender, Snowflake channel_id)
+	: m_channel_id{channel_id}, m_sender{sender} {}
 
 ModifyChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{
@@ -64,15 +61,5 @@ ModifyChannel::operator net::HttpRequest() const {
 	req.prepare_payload();
 
 	return req;
-}
-
-Result<Channel> ModifyChannel::send(const asio::yield_context& yield) const {
-	if (!m_make_request) {
-		return boost::system::errc::operation_not_permitted;
-	}
-
-	EKIZU_TRY(auto res, m_make_request(*this, yield));
-
-	return json_util::deserialize<Channel>(res.body());
 }
 }  // namespace ekizu

@@ -1,16 +1,9 @@
 #include <ekizu/attachment.hpp>
-#include <ekizu/http.hpp>
 #include <ekizu/json_util.hpp>
 
 namespace ekizu {
 using json_util::deserialize;
 using json_util::serialize;
-
-Result<std::string> Attachment::download(
-	const boost::asio::yield_context &yield) const {
-	EKIZU_TRY(auto res, net::HttpConnection::get(url, yield));
-	return res.body();
-}
 
 void to_json(nlohmann::json &j, const Attachment &a) {
 	serialize(j, "id", a.id);

@@ -1,0 +1,13 @@
+{
+  "builtin-baseline": "d5ec528843d29e3a52d745a64b469f810b2cedbf",
+  "name": "libdave",
+  "description": "C++ library supporting Discord's Audio & Video End-to-End Encryption (DAVE) protocol",
+  "version-string": "c0cf6449724082488aeb9d9c5398fe1c131abb04",
+  "dependencies": [
+    "gtest",
+    "mlspp",
+    "openssl",
+    "vcpkg-cmake",
+    "vcpkg-cmake-config"
+  ]
+}
