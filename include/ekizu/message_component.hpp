@@ -60,6 +60,11 @@ struct ButtonBuilder {
 		return *this;
 	}
 
+	ButtonBuilder &disabled(bool disabled) {
+		m_button.disabled = disabled;
+		return *this;
+	}
+
    private:
 	Button m_button;
 };

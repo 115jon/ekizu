@@ -1,7 +1,6 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm/copy.hpp>
 #include <ekizu/async_main.hpp>
-#include <ekizu/embed_builder.hpp>
 #include <ekizu/http_client.hpp>
 #include <ekizu/shard.hpp>
 #include <nlohmann/json.hpp>
