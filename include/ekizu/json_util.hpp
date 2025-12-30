@@ -10,8 +10,13 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <algorithm>
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/result.hpp>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 
@@ -43,6 +48,17 @@ struct IsVector<std::vector<T>> : std::true_type {};
 
 template <typename T>
 constexpr bool IS_VECTOR_V = IsVector<T>::value;
+
+template <typename T>
+struct IsUnorderedMap : std::false_type {};
+
+template <typename Key, typename Value, typename Hash, typename KeyEqual,
+		  typename Allocator>
+struct IsUnorderedMap<std::unordered_map<Key, Value, Hash, KeyEqual, Allocator>>
+	: std::true_type {};
+
+template <typename T>
+constexpr bool IS_UNORDERED_MAP_V = IsUnorderedMap<T>::value;
 
 template <typename T, typename = void>
 struct has_to_json : std::false_type {};
@@ -107,8 +123,27 @@ template <typename T, typename ToDeserialize = T>
 void deserialize_impl(const nlohmann::json &value, T &dest) {
 	if (value.is_discarded() || value.is_null()) { return; }
 
-	// Unique case.
-	if constexpr (std::is_integral_v<ToDeserialize>) {
+	if constexpr (IS_UNORDERED_MAP_V<ToDeserialize>) {
+		// Handle JSON object -> unordered_map
+		if (!value.is_object()) { return; }
+
+		dest.clear();
+		using KeyType = typename ToDeserialize::key_type;
+		using ValueType = typename ToDeserialize::mapped_type;
+
+		for (auto it = value.begin(); it != value.end(); ++it) {
+			KeyType key{};
+			// If key is a Snowflake or similar, parse it from string
+			if constexpr (std::is_integral_v<KeyType>) {
+				deserialize_int(it.key(), key);
+			} else {
+				// Use nlohmann's conversion
+				nlohmann::json key_json = it.key();
+				key = key_json.get<KeyType>();
+			}
+			dest.emplace(std::move(key), it.value().get<ValueType>());
+		}
+	} else if constexpr (std::is_integral_v<ToDeserialize>) {
 		if (value.is_string()) {
 			return deserialize_int(value.get<std::string>(), dest);
 		}
@@ -124,7 +159,7 @@ void deserialize_impl(const nlohmann::json &value, T &dest) {
 template <typename... Types>
 void from_json(const nlohmann::json &j, std::variant<Types...> &v) {
 	std::optional<std::variant<Types...>> temp;
-	deserialize_variant_impl(j, temp);
+	detail::deserialize_variant_impl(j, temp);
 
 	if (temp) { v = std::move(*temp); }
 }
@@ -245,21 +280,37 @@ T get_or_default(const nlohmann::json &data, std::string_view key) {
 }
 
 inline Result<nlohmann::json> try_parse(std::string_view str) {
+	ekizu::clear_error_context();
+
 	auto json = nlohmann::json::parse(str, nullptr, false);
 
-	if (json.is_discarded()) { return boost::system::errc::invalid_argument; }
+	if (json.is_discarded()) {
+		constexpr std::size_t preview_len = 256;
+		const auto preview = str.substr(0, (std::min)(preview_len, str.size()));
+
+		std::string ctx;
+		ctx.reserve(64 + preview.size());
+		ctx.append("JSON parse failed; input preview: ");
+		ctx.append(preview.data(), preview.size());
+
+		ekizu::set_error_context(ctx);
+		return ekizu::make_error_code(ekizu::errc::json_parse_failed);
+	}
 
 	return json;
 }
 
 template <typename T>
 Result<T> deserialize(std::string_view str) {
+	ekizu::clear_error_context();
+
 	EKIZU_TRY(auto j, try_parse(str));
 
 	try {
 		return j.get<T>();
-	} catch (const nlohmann::json::exception &) {
-		return boost::system::errc::invalid_argument;
+	} catch (const nlohmann::json::exception &e) {
+		ekizu::set_error_context(e.what());
+		return ekizu::make_error_code(ekizu::errc::json_deserialize_failed);
 	}
 }
 }  // namespace ekizu::json_util

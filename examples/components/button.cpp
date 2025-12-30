@@ -92,11 +92,14 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 
 				if (msg.author.id == bot_id) { return; }
 
-				ActionRow row{{ButtonBuilder()
-								   .style(ButtonStyle::Primary)
-								   .custom_id("click_me")
-								   .label("Click me")
-								   .build()}};
+				ActionRow row =
+					ActionRowBuilder()
+						.components({ButtonBuilder()
+										 .style(ButtonStyle::Primary)
+										 .custom_id("click_me")
+										 .label("Click me")
+										 .build()})
+						.build();
 
 				auto res = http.create_message(msg.channel_id)
 							   .components({row})

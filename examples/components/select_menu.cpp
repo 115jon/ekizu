@@ -80,12 +80,13 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 									 InteractionResponseBuilder()
 										 .type(InteractionResponseType::
 												   ChannelMessageWithSource)
-										 .embeds({EmbedBuilder()
-													  .set_title(fmt::format(
-														  "{} **is** the best!",
-														  SELECT_OPTIONS.at(
-															  data.values[0])))
-													  .build()})
+										 .embeds(
+											 {EmbedBuilder()
+												  .set_title(fmt::format(
+													  "{} **is** the best!",
+													  SELECT_OPTIONS.at(
+														  (*data.values)[0])))
+												  .build()})
 										 .flags(MessageFlags::Ephemeral)
 										 .build();
 

@@ -78,6 +78,8 @@ struct RateLimiter {
 	void maybe_wait_then_send(Pending p);
 	void do_send(Pending p);
 	void finish_one(Pending p, Result<net::HttpResponse> result);
+	void finish_one(Pending p, Result<net::HttpResponse> result,
+					std::string context);
 
 	boost::asio::strand<boost::asio::any_io_executor> m_strand;
 	SendFn m_send_fn;

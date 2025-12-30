@@ -1,6 +1,7 @@
 #ifndef EKIZU_CHANNEL_HPP
 #define EKIZU_CHANNEL_HPP
 
+#include <ekizu/channel_type.hpp>
 #include <ekizu/guild_member.hpp>
 #include <ekizu/permissions.hpp>
 #include <ekizu/presence.hpp>
@@ -11,35 +12,6 @@ enum class ChannelFlags : uint64_t {
 	Pinned = 1 << 1,
 	/// New threads in a forum channel require a tag.
 	RequireTag = 1 << 4,
-};
-
-enum class ChannelType : uint8_t {
-	/// A text channel within a server.
-	GuildText = 0,
-	/// A private channel between users.
-	Dm = 1,
-	/// A voice channel within a server.
-	GuildVoice = 2,
-	/// A private channel between multiple users.
-	GroupDm = 3,
-	/// A category that contains up to 50 channels.
-	GuildCategory = 4,
-	/// A channel that users can follow and crosspost into their own server.
-	GuildNews = 5,
-	/// A temporary sub-channel within a GUILD_NEWS channel.
-	GuildNewsThread = 10,
-	/// A temporary sub-channel within a GUILD_NEWS channel.
-	GuildPublicThread = 11,
-	/// A temporary sub-channel within A GUILD_NEWS channel, that is only
-	/// visible by those invited and those with the
-	/// MANAGE_THREADS permission.
-	GuildPrivateThread = 12,
-	/// A voice channel for hosting events with an audience.
-	GuildStageVoice = 13,
-	/// The channel in a hub containing a list of servers.
-	GuildDirectory = 14,
-	/// A channel that can only contain threads.
-	GuildForum = 15,
 };
 
 struct DefaultReaction {

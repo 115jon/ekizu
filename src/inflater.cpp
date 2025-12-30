@@ -49,6 +49,17 @@ Inflater &Inflater::operator=(Inflater &&) noexcept = default;
 Inflater::~Inflater() = default;
 
 Result<std::string> Inflater::inflate(boost::span<const char> data) {
+	// Check for zlib suffix (Discord gateway requirement)
+	if (data.size() < 4) { return boost::system::errc::not_supported; }
+
+	const auto *const end = data.end();
+	if (*(end - 4) != 0x00 || *(end - 3) != 0x00 ||
+		*(end - 2) != static_cast<char>(0xff) ||
+		*(end - 1) != static_cast<char>(0xff)) {
+		// Incomplete stream - need to buffer and wait for more data
+		return boost::system::errc::not_supported;
+	}
+
 	m_impl->stream->avail_in = static_cast<uint32_t>(data.size());
 	m_impl->stream->next_in =
 		reinterpret_cast<uint8_t *>(const_cast<char *>(data.data()));
@@ -56,12 +67,14 @@ Result<std::string> Inflater::inflate(boost::span<const char> data) {
 	std::string result;
 	result.reserve(data.size() * 2);
 
+	int res{};
 	do {
 		m_impl->stream->avail_out = static_cast<uint32_t>(m_buffer.size());
 		m_impl->stream->next_out = reinterpret_cast<uint8_t *>(m_buffer.data());
 
-		if (const auto res = ::inflate(m_impl->stream.get(), Z_NO_FLUSH);
-			res != Z_OK) {
+		res = ::inflate(m_impl->stream.get(), Z_SYNC_FLUSH);
+
+		if (res != Z_OK && res != Z_STREAM_END && res != Z_BUF_ERROR) {
 			inflateReset(m_impl->stream.get());
 			return boost::system::errc::not_supported;
 		}

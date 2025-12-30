@@ -1,3 +1,5 @@
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/http_client.hpp>
 
 namespace ekizu {
@@ -284,7 +286,12 @@ void HttpClient::send_http_attempt(
 	boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
 		handler) {
 	if (!m_token) {
-		std::move(handler)(boost::system::errc::operation_not_permitted);
+		ekizu::clear_error_context();
+		ekizu::set_error_context(
+			"HttpClient: missing bot token (client shut down or not "
+			"initialized)");
+		std::move(handler)(
+			ekizu::make_error_code(ekizu::errc::http_not_authenticated));
 		return;
 	}
 
