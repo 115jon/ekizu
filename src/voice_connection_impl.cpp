@@ -16,8 +16,7 @@ ekizu::Result<std::uint64_t> parse_media_session_id_prefix_hex16(
 	const char *first = s.data();
 	const char *last = first + 16;
 
-	auto r = boost::charconv::from_chars(
-		first, last, v, 16);  // base-16 parse [web:71]
+	auto r = boost::charconv::from_chars(first, last, v, 16);
 
 	if (r.ec == std::errc{} && r.ptr == last) { return v; }
 
@@ -589,7 +588,6 @@ void VoiceConnection::Impl::handle_session_description_async(
 void VoiceConnection::Impl::opus_sender_loop() {
 	auto self = shared_from_this();
 	if (!m_channel || !m_udp) { return; }
-
 	if (!m_send_timer) { m_send_timer.emplace(m_strand.get_inner_executor()); }
 
 	// Signal "ready" once.
@@ -736,8 +734,7 @@ void VoiceConnection::Impl::opus_sender_loop() {
 								"Too many consecutive UDP send failures, "
 								"stopping sender",
 								LogLevel::Error);
-							return;	 // Stop sender loop (matches old “bail out”
-									 // behavior).
+							return;	 // Stop sender loop.
 						}
 
 						me->step();
@@ -859,6 +856,139 @@ void VoiceConnection::Impl::ws_listen_loop() {
 							return;
 						}
 
+						case VoiceOpcode::ClientsConnect: {
+							// Handle clients_connect opcode (11) - users
+							// joining the voice session
+							if (data["d"].contains("user_ids") &&
+								data["d"]["user_ids"].is_array()) {
+								for (const auto &user_id_json :
+									 data["d"]["user_ids"]) {
+									if (user_id_json.is_string()) {
+										std::string user_id =
+											user_id_json.get<std::string>();
+										me->impl->m_recognized_user_ids.insert(
+											user_id);
+										me->impl->log(
+											fmt::format(
+												"User {} connected (now "
+												"recognized for MLS)",
+												user_id),
+											LogLevel::Info);
+									}
+								}
+							}
+							break;
+						}
+
+						case VoiceOpcode::ClientDisconnect: {
+							// Handle client_disconnect opcode (13) - user
+							// leaving the voice session
+							if (data["d"].contains("user_id") &&
+								data["d"]["user_id"].is_string()) {
+								std::string user_id =
+									data["d"]["user_id"].get<std::string>();
+								me->impl->m_recognized_user_ids.erase(user_id);
+								me->impl->log(
+									fmt::format("User {} disconnected (removed "
+												"from recognized MLS users)",
+												user_id),
+									LogLevel::Info);
+							}
+							break;
+						}
+
+						case VoiceOpcode::DavePrepareTransition: {
+							// Handle dave_protocol_prepare_transition opcode
+							// (21) When transition_id = 0, this signals sole
+							// member initialization
+							if (data["d"].contains("transition_id") &&
+								data["d"]["transition_id"].is_number()) {
+								uint16_t transition_id =
+									data["d"]["transition_id"].get<uint16_t>();
+
+								if (transition_id == 0) {
+									// Sole member reset: activate the pending
+									// group immediately
+									me->impl->log(
+										"Received sole member init "
+										"(transition_id=0), activating pending "
+										"group",
+										LogLevel::Info);
+
+									if (me->impl->m_dave_manager
+											->commit_pending_group()) {
+										me->impl->log(
+											"Successfully activated pending "
+											"group for sole member",
+											LogLevel::Info);
+
+										// Execute the transition to install
+										// sender ratchet
+										me->impl
+											->execute_dave_transition_now_async(
+												me->impl->m_dave_manager
+													->protocol_version(),
+												[me](Result<>) mutable {
+													me->step();
+												});
+										return;
+									}
+									me->impl->log(
+										"Failed to activate pending group",
+										LogLevel::Error);
+								}
+							}
+							break;
+						}
+
+						case VoiceOpcode::DaveExecuteTransition: {
+							// Handle dave_protocol_execute_transition opcode
+							// (22) This is sent by Discord to instruct us to
+							// execute a prepared epoch transition
+							if (data["d"].contains("transition_id") &&
+								data["d"]["transition_id"].is_number()) {
+								uint16_t transition_id =
+									data["d"]["transition_id"].get<uint16_t>();
+								me->impl->log(
+									fmt::format(
+										"Executing DAVE transition for tid={}",
+										transition_id),
+									LogLevel::Info);
+
+								// Execute the transition now
+								me->impl->execute_dave_transition_now_async(
+									me->impl->m_dave_manager
+										->protocol_version(),
+									[me](Result<>) mutable { me->step(); });
+								return;
+							}
+							break;
+						}
+
+						case VoiceOpcode::DavePrepareEpoch: {
+							// Handle dave_protocol_prepare_epoch opcode (24)
+							// When epoch = 1, this signals a sole member reset
+							if (data["d"].contains("epoch") &&
+								data["d"]["epoch"].is_number() &&
+								data["d"]["epoch"].get<int>() == 1) {
+								me->impl->log(
+									"Received sole member reset (epoch=1), "
+									"resetting MLS session",
+									LogLevel::Info);
+
+								// Reset the MLS session as per DAVE spec
+								me->impl->m_dave_manager->reset_session();
+
+								// Re-initialize and send a new key package
+								me->impl->maybe_start_mls_async(
+									false,	// don't force reset (we just did
+											// it)
+									[me](Result<>) mutable { me->step(); });
+								return;
+							}
+							break;
+						}
+
 						default: break;
 					}
 
@@ -926,10 +1056,17 @@ void VoiceConnection::Impl::handle_binary_event_async(
 						payload, recognized);
 					if (!res) {
 						self->log(
-							"process_proposals failed; staying in current MLS "
-							"state",
+							"process_proposals failed; resetting MLS session",
 							LogLevel::Warn);
-						std::move(h)(outcome::success());
+
+						self->maybe_start_mls_async(
+							true, [self, h = std::move(h)](Result<> r) mutable {
+								if (!r) {
+									std::move(h)(r.error());
+									return;
+								}
+								std::move(h)(outcome::success());
+							});
 						return;
 					}
 
@@ -952,8 +1089,7 @@ void VoiceConnection::Impl::handle_binary_event_async(
 								std::move(h)(r.error());
 								return;
 							}
-							auto p = payload;  // or keep payload mutable by
-											   // removing const on capture
+							auto p = payload;
 							auto hh = std::move(h);
 							process(p, hh);
 						});
@@ -1011,16 +1147,8 @@ void VoiceConnection::Impl::handle_binary_event_async(
 					 static_cast<uint8_t>(VoiceOpcode::DaveTransitionReady)},
 					{"d", {{"transition_id", tid}}}};
 
-				self->send_voice_json(
-					ready, [self, h = std::move(h)](Result<> r) mutable {
-						if (!r) {
-							std::move(h)(r.error());
-							return;
-						}
-						self->execute_dave_transition_now_async(
-							self->m_dave_manager->protocol_version(),
-							std::move(h));
-					});
+				// Send ready and wait for Discord to send DaveExecuteTransition
+				self->send_voice_json(ready, std::move(h));
 				return;
 			}
 

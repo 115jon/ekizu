@@ -298,7 +298,15 @@ void HttpClient::send_http_attempt(
 	// Normalize request
 	req.set(net::http::field::authorization, fmt::format("Bot {}", *m_token));
 	req.set(net::http::field::host, "discord.com");
-	req.target(fmt::format("/api/v10{}", boost::to_string(req.target())));
+
+	// Normalize target (ensure leading '/' and avoid double-prefixing on
+	// retry).
+	std::string target = boost::to_string(req.target());
+	if (target.empty() || target.front() != '/') {
+		target.insert(target.begin(), '/');
+	}
+	if (target.rfind("/api/", 0) != 0) { target = "/api/v10" + target; }
+	req.target(target);
 
 	// Copy for a single retry.
 	net::HttpRequest original = req;

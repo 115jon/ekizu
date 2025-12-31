@@ -53,8 +53,8 @@ struct CreateMessage {
 		return *this;
 	}
 
-	CreateMessage &components(const std::vector<MessageComponent> &components) {
-		m_fields.components = components;
+	CreateMessage &components(std::vector<MessageComponent> components) {
+		m_fields.components = std::move(components);
 		return *this;
 	}
 
