@@ -5,6 +5,7 @@
 #include <ekizu/error.hpp>
 #include <ekizu/error_context.hpp>
 #include <ekizu/udp.hpp>
+#include <vector>
 
 namespace ekizu::net {
 using asio::ip::udp;
@@ -466,7 +467,8 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 			m_recvq.pop_front();
 		}
 
-		auto buf = std::make_shared<std::array<char, 2048>>();
+		constexpr std::size_t MAX_DATAGRAM_SIZE = 65536;
+		auto buf = std::make_shared<std::vector<char>>(MAX_DATAGRAM_SIZE);
 		auto sender = std::make_shared<Endpoint>();
 		auto self = shared_from_this();
 

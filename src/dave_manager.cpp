@@ -155,6 +155,18 @@ bool DaveManager::install_sender_ratchet() {
 	return true;
 }
 
+bool DaveManager::install_receiver_ratchet(const std::string &user_id) {
+	if (!m_session) { return false; }
+	if (!m_joined_via_welcome) { return false; }
+
+	auto ratchet = m_session->GetKeyRatchet(user_id);
+	if (!ratchet) { return false; }
+
+	m_decryptor.TransitionToKeyRatchet(std::move(ratchet));
+
+	return true;
+}
+
 void DaveManager::set_passthrough_mode(bool enabled) {
 	m_encryptor.SetPassthroughMode(enabled);
 	m_decryptor.TransitionToPassthroughMode(enabled);

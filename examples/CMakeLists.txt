@@ -28,4 +28,4 @@ foreach(example ${examples})
     )
 endforeach()
 
-file(COPY airhorn.dca DESTINATION ${CMAKE_BINARY_DIR}/bin)
+file(COPY airhorn.dca DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

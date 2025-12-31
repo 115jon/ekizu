@@ -57,12 +57,14 @@ struct DaveManager {
 	void assign_ssrc_to_codec(uint32_t ssrc, discord::dave::Codec codec);
 
 	bool install_sender_ratchet();
+	bool install_receiver_ratchet(const std::string &user_id);
 
 	void set_passthrough_mode(bool enabled);
 	bool is_passthrough_mode() const noexcept;
 	bool has_key_ratchet() const noexcept;
 
 	bool ready_to_send() const noexcept;
+	bool ready_to_receive() const noexcept;
 
 	Result<std::size_t> encrypt_frame(discord::dave::MediaType media_type,
 									  uint32_t ssrc,
