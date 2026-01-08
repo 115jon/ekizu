@@ -49,6 +49,22 @@ file(GLOB_RECURSE sources CONFIGURE_DEPENDS "include/*.hpp" "src/*.cpp")
 add_library(ekizu ${sources})
 add_library(ekizu::ekizu ALIAS ekizu)
 
+# -----------------------------------------------------------------------------
+# Unity/JUMBO Builds - Combine multiple .cpp files for faster compilation
+# -----------------------------------------------------------------------------
+# Unity builds merge .cpp files reducing redundant header parsing. Enable via:
+# -DCMAKE_UNITY_BUILD=ON or -Dekizu_UNITY_BUILD=ON
+option(ekizu_UNITY_BUILD "Enable Unity/JUMBO builds" OFF)
+
+if(ekizu_UNITY_BUILD OR CMAKE_UNITY_BUILD)
+    set_target_properties(
+        ekizu
+        PROPERTIES UNITY_BUILD ON UNITY_BUILD_BATCH_SIZE 10 # Tune based on
+                                                            # available memory
+    )
+    message(STATUS "ekizu: Unity build enabled")
+endif()
+
 target_compile_definitions(
     ekizu PUBLIC $<$<NOT:$<BOOL:${BUILD_SHARED_LIBS}>>:EKIZU_STATIC_DEFINE>
 )
@@ -150,6 +166,65 @@ generate_export_header(
     ekizu EXPORT_FILE_NAME
     ${CMAKE_CURRENT_BINARY_DIR}/generated/ekizu/export.hpp
 )
+
+# -----------------------------------------------------------------------------
+# Precompiled Headers (PCH) - Major compilation speedup
+# -----------------------------------------------------------------------------
+# PCH precompiles expensive headers (Boost.Asio, Boost.Beast, nlohmann_json)
+# once rather than reparsing them for every .cpp file. Disable with:
+# -Dekizu_USE_PCH=OFF
+option(ekizu_USE_PCH "Use precompiled headers to speed up compilation" ON)
+
+if(ekizu_USE_PCH AND CMAKE_VERSION VERSION_GREATER_EQUAL 3.16)
+    message(STATUS "ekizu: Using precompiled headers")
+    target_precompile_headers(
+        ekizu
+        PRIVATE
+        # Heavy Boost headers
+        <boost/asio/any_completion_executor.hpp>
+        <boost/asio/any_completion_handler.hpp>
+        <boost/asio/any_io_executor.hpp>
+        <boost/asio/associated_executor.hpp>
+        <boost/asio/async_result.hpp>
+        <boost/asio/bind_executor.hpp>
+        <boost/asio/dispatch.hpp>
+        <boost/asio/post.hpp>
+        <boost/asio/strand.hpp>
+        <boost/asio/steady_timer.hpp>
+        <boost/asio/ip/tcp.hpp>
+        <boost/asio/ip/udp.hpp>
+        <boost/beast/core/flat_buffer.hpp>
+        <boost/beast/core/tcp_stream.hpp>
+        <boost/beast/http.hpp>
+        <boost/beast/ssl/ssl_stream.hpp>
+        <boost/beast/websocket/stream.hpp>
+        <boost/beast/websocket/ssl.hpp>
+        <boost/url.hpp>
+        <boost/certify/https_verification.hpp>
+        # nlohmann_json
+        <nlohmann/json.hpp>
+        # fmt
+        <fmt/format.h>
+        # Standard library
+        <algorithm>
+        <array>
+        <atomic>
+        <chrono>
+        <deque>
+        <functional>
+        <memory>
+        <mutex>
+        <optional>
+        <queue>
+        <string>
+        <string_view>
+        <unordered_map>
+        <variant>
+        <vector>
+    )
+else()
+    message(STATUS "ekizu: Precompiled headers disabled")
+endif()
 
 if(ekizu_BUILD_EXAMPLES)
     add_subdirectory(examples)
