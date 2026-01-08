@@ -9,6 +9,8 @@
 #include <boost/certify/https_verification.hpp>
 #include <boost/url/parse.hpp>
 #include <deque>
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/http.hpp>
 #include <memory>
 #include <string>
@@ -364,16 +366,26 @@ void HttpConnection::connect_impl(
 	if (!parsed) {
 		asio::dispatch(asio::bind_executor(
 			handler_ex, [h = std::move(handler), e = parsed.error()]() mutable {
+				ekizu::clear_error_context();
+				ekizu::set_error_context("HTTP URL parse failed");
 				std::move(h)(e);
 			}));
 		return;
 	}
 
 	const auto uri = parsed.value();
+
 	if (uri.scheme() != "http" && uri.scheme() != "https") {
-		asio::dispatch(
-			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::not_supported);
+		asio::dispatch(asio::bind_executor(
+			handler_ex, [h = std::move(handler), url_s = std::string(url),
+						 scheme_s = std::string(uri.scheme())]() mutable {
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"Unsupported URL scheme for HttpConnection::connect: "
+					"scheme=" +
+					scheme_s + " url=" + url_s);
+				std::move(h)(ekizu::make_error_code(
+					ekizu::errc::http_unsupported_scheme));
 			}));
 		return;
 	}
@@ -474,7 +486,12 @@ void HttpConnection::request_impl(
 	if (!m_impl) {
 		asio::dispatch(
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"HttpConnection::request called without a live connection "
+					"(moved-from or not connected)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::http_not_connected));
 			}));
 		return;
 	}
@@ -491,6 +508,8 @@ void HttpConnection::get_impl(
 	if (!parsed) {
 		asio::dispatch(asio::bind_executor(
 			handler_ex, [h = std::move(handler), e = parsed.error()]() mutable {
+				ekizu::clear_error_context();
+				ekizu::set_error_context("HTTP URL parse failed");
 				std::move(h)(e);
 			}));
 		return;

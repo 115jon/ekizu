@@ -28,8 +28,8 @@ struct overload : Func... {
 template <typename... Func>
 overload(Func...) -> overload<Func...>;
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http, const asio::yield_context &yield);
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
+					  const asio::yield_context &yield);
 
 async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
@@ -81,8 +81,7 @@ async_main(const asio::yield_context &yield) {
 	return outcome::success();
 }
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http,
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 					  const asio::yield_context &yield) {
 	const auto &logger = get_logger();
 

@@ -16,8 +16,8 @@ struct SearchGuildMembers {
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	SearchGuildMembers &query(std::string_view query) {
-		m_fields.query = query;
+	SearchGuildMembers &query(std::string query) {
+		m_fields.query = std::move(query);
 		return *this;
 	}
 

@@ -19,8 +19,8 @@ struct ModifyCurrentMember {
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	ModifyCurrentMember &nick(std::string_view nick) {
-		m_fields.nick = nick;
+	ModifyCurrentMember &nick(std::string nick) {
+		m_fields.nick = std::move(nick);
 		return *this;
 	}
 

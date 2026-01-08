@@ -25,8 +25,8 @@ struct ModifyGuildMember {
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	ModifyGuildMember &nick(std::string_view nick) {
-		m_fields.nick = nick;
+	ModifyGuildMember &nick(std::string nick) {
+		m_fields.nick = std::move(nick);
 		return *this;
 	}
 
@@ -50,8 +50,8 @@ struct ModifyGuildMember {
 		return *this;
 	}
 
-	ModifyGuildMember &communication_disabled_until(std::string_view until) {
-		m_fields.communication_disabled_until = until;
+	ModifyGuildMember &communication_disabled_until(std::string until) {
+		m_fields.communication_disabled_until = std::move(until);
 		return *this;
 	}
 

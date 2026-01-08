@@ -1,6 +1,7 @@
 #ifndef EKIZU_REQUEST_INTERACTION_CREATE_RESPONSE_HPP
 #define EKIZU_REQUEST_INTERACTION_CREATE_RESPONSE_HPP
 
+#include <ekizu/application_command.hpp>
 #include <ekizu/http.hpp>
 #include <ekizu/message.hpp>
 #include <ekizu/request/request_sender.hpp>
@@ -24,6 +25,9 @@ struct InteractionResponseData {
 	std::optional<MessageFlags> flags;
 	std::optional<std::vector<MessageComponent>> components;
 	std::optional<std::vector<PartialAttachment>> attachments;
+	std::optional<std::vector<ApplicationCommandOptionChoice>> choices;
+	std::optional<std::string> custom_id;
+	std::optional<std::string> title;
 };
 
 EKIZU_EXPORT void to_json(nlohmann::json &j, const InteractionResponseData &d);
@@ -52,9 +56,9 @@ struct InteractionResponseBuilder {
 		return *this;
 	}
 
-	InteractionResponseBuilder &content(std::string_view content) {
+	InteractionResponseBuilder &content(std::string content) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->content = content;
+		m_response.data->content = std::move(content);
 		return *this;
 	}
 
@@ -91,14 +95,32 @@ struct InteractionResponseBuilder {
 		return *this;
 	}
 
+	InteractionResponseBuilder &choices(
+		const std::vector<ApplicationCommandOptionChoice> &choices) {
+		if (!m_response.data) { m_response.data.emplace(); }
+		m_response.data->choices = choices;
+		return *this;
+	}
+
+	InteractionResponseBuilder &custom_id(std::string custom_id) {
+		if (!m_response.data) { m_response.data.emplace(); }
+		m_response.data->custom_id = std::move(custom_id);
+		return *this;
+	}
+
+	InteractionResponseBuilder &title(std::string title) {
+		if (!m_response.data) { m_response.data.emplace(); }
+		m_response.data->title = std::move(title);
+		return *this;
+	}
+
    private:
 	InteractionResponse m_response;
 };
 
 struct CreateResponse {
 	CreateResponse(RequestSender sender, Snowflake interaction_id,
-				   std::string_view interaction_token,
-				   InteractionResponse response);
+				   std::string interaction_token, InteractionResponse response);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 

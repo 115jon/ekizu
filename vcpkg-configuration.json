@@ -12,6 +12,14 @@
       "kind": "artifact",
       "location": "https://github.com/microsoft/vcpkg-ce-catalog/archive/refs/heads/main.zip",
       "name": "microsoft"
+    },
+    {
+      "kind": "git",
+      "repository": "https://github.com/115jon/vcpkg-registry",
+      "baseline": "47af51dfa527e4ec97c268d54be3867f5b734db3",
+      "packages": [
+        "certify"
+      ]
     }
   ]
 }

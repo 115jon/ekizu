@@ -12,6 +12,9 @@ void to_json(nlohmann::json &j, const InteractionResponseData &d) {
 	serialize(j, "flags", d.flags);
 	serialize(j, "components", d.components);
 	serialize(j, "attachments", d.attachments);
+	serialize(j, "choices", d.choices);
+	serialize(j, "custom_id", d.custom_id);
+	serialize(j, "title", d.title);
 }
 
 void from_json(const nlohmann::json &j, InteractionResponseData &d) {
@@ -22,6 +25,9 @@ void from_json(const nlohmann::json &j, InteractionResponseData &d) {
 	deserialize(j, "flags", d.flags);
 	deserialize(j, "components", d.components);
 	deserialize(j, "attachments", d.attachments);
+	deserialize(j, "choices", d.choices);
+	deserialize(j, "custom_id", d.custom_id);
+	deserialize(j, "title", d.title);
 }
 
 void to_json(nlohmann::json &j, const InteractionResponse &r) {
@@ -35,11 +41,11 @@ void from_json(const nlohmann::json &j, InteractionResponse &r) {
 }
 
 CreateResponse::CreateResponse(RequestSender sender, Snowflake interaction_id,
-							   std::string_view interaction_token,
+							   std::string interaction_token,
 							   InteractionResponse response)
 	: m_sender{sender},
 	  m_interaction_id{interaction_id},
-	  m_interaction_token{interaction_token},
+	  m_interaction_token{std::move(interaction_token)},
 	  m_response{std::move(response)} {}
 
 CreateResponse::operator net::HttpRequest() const {

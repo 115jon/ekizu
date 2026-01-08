@@ -20,14 +20,14 @@ struct ModifyCurrentUser {
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 
-	ModifyCurrentUser &avatar(std::string_view avatar) {
-		m_fields.avatar = avatar;
+	ModifyCurrentUser &avatar(std::string avatar) {
+		m_fields.avatar = std::move(avatar);
 		return *this;
 	}
 
-	ModifyCurrentUser &username(std::string_view username) {
+	ModifyCurrentUser &username(std::string username) {
 		// TODO: Validate username
-		m_fields.username = username;
+		m_fields.username = std::move(username);
 		return *this;
 	}
 

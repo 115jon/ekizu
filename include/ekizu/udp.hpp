@@ -26,7 +26,7 @@ namespace asio = boost::asio;
 ///
 /// \par Destruction Guarantees
 /// The destructor guarantees that all pending receive handlers
-/// will be invoked with operation_canceled, provided the associated
+/// will be invoked with ekizu::errc::udp_closed, provided the associated
 /// io_context continues running.
 struct UdpSocket {
 	UdpSocket(const UdpSocket &) = delete;

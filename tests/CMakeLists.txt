@@ -4,12 +4,12 @@ file(GLOB test_sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
      ${CMAKE_CURRENT_SOURCE_DIR}/test_support/*.hpp
 )
 
-find_package(Boost REQUIRED COMPONENTS coroutine2)
+find_package(Boost REQUIRED COMPONENTS coroutine)
 add_executable(${test_app_name} ${test_sources})
 target_include_directories(${test_app_name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
     ${test_app_name} PRIVATE Catch2::Catch2WithMain ekizu::ekizu
-                             Boost::coroutine2
+                             Boost::coroutine
 )
 if("cxx_std_20" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
     target_compile_features(${test_app_name} PRIVATE cxx_std_20)

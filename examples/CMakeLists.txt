@@ -2,10 +2,9 @@ project(${CMAKE_PROJECT_NAME}_examples LANGUAGES C CXX)
 
 file(GLOB_RECURSE examples "*.cpp")
 
-find_package(Boost REQUIRED COMPONENTS coroutine2)
+find_package(Boost REQUIRED COMPONENTS coroutine)
 find_package(portaudio REQUIRED)
 
-set(portaudio_target "")
 if(TARGET portaudio)
     set(portaudio_target portaudio)
 elseif(TARGET portaudio_static)
@@ -24,8 +23,8 @@ foreach(example ${examples})
     add_executable(${example_name} ${example})
     target_link_libraries(
         ${example_name} PRIVATE ${CMAKE_PROJECT_NAME} ${portaudio_target}
-                                spdlog::spdlog Boost::coroutine2
+                                spdlog::spdlog Boost::coroutine
     )
 endforeach()
 
-file(COPY airhorn.dca DESTINATION ${CMAKE_BINARY_DIR}/bin)
+file(COPY airhorn.dca DESTINATION ${CMAKE_CURRENT_BINARY_DIR})

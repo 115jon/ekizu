@@ -3,9 +3,9 @@
 namespace ekizu {
 GetOriginalResponse::GetOriginalResponse(RequestSender sender,
 										 Snowflake application_id,
-										 std::string_view interaction_token)
+										 std::string interaction_token)
 	: m_application_id{application_id},
-	  m_interaction_token{interaction_token},
+	  m_interaction_token{std::move(interaction_token)},
 	  m_sender{sender} {}
 
 GetOriginalResponse::operator net::HttpRequest() const {

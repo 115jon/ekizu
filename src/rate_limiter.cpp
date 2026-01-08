@@ -1,7 +1,53 @@
+#include <fmt/format.h>
+
 #include <boost/asio/bind_executor.hpp>
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/rate_limiter.hpp>
 
 namespace ekizu {
+
+namespace {
+constexpr std::size_t k_error_body_limit = 1024;
+
+static std::string build_http_status_context(const net::HttpRequest &req,
+											 const net::HttpResponse &res) {
+	std::string body = res.body();
+	if (body.size() > k_error_body_limit) {
+		body.resize(k_error_body_limit);
+		body.append("...(truncated)");
+	}
+
+	std::string headers;
+	for (const auto &field : req) {
+		fmt::format_to(std::back_inserter(headers), "\n  {}: {}",
+					   field.name_string(), field.value());
+	}
+
+	if (body.empty()) {
+		return fmt::format(
+			"HTTP status {} ({}) for {} {}{}", res.result_int(), res.reason(),
+			req.method_string(), req.target(), headers);
+	}
+	return fmt::format(
+		"HTTP status {} ({}) for {} {}{}; body: {}", res.result_int(),
+		res.reason(), req.method_string(), req.target(), headers, body);
+}
+
+static ekizu::errc map_http_status_to_errc(net::HttpStatus status) {
+	// Discord API expected success responses are 2xx; everything else is
+	// treated as an error.
+	if (status == net::HttpStatus::too_many_requests) {
+		return ekizu::errc::http_rate_limited;
+	}
+	auto s = static_cast<unsigned>(status);
+	if (s >= 300 && s < 400) { return ekizu::errc::http_redirection; }
+	if (s >= 400 && s < 500) { return ekizu::errc::http_client_error; }
+	if (s >= 500 && s < 600) { return ekizu::errc::http_server_error; }
+	return ekizu::errc::http_error;
+}
+
+}  // namespace
 
 RateLimiter::RateLimiter(const boost::asio::any_io_executor &executor,
 						 SendFn send_fn)
@@ -24,7 +70,8 @@ void RateLimiter::shutdown() {
 			m_waiting.reset();
 			finish_one(
 				std::move(p),
-				make_error_code(boost::system::errc::operation_canceled));
+				ekizu::make_error_code(ekizu::errc::rate_limiter_stopped),
+				"RateLimiter: shutdown");
 		}
 
 		// Fail queued requests immediately.
@@ -33,7 +80,8 @@ void RateLimiter::shutdown() {
 			m_queue.pop_front();
 			finish_one(
 				std::move(p),
-				make_error_code(boost::system::errc::operation_canceled));
+				ekizu::make_error_code(ekizu::errc::rate_limiter_stopped),
+				"RateLimiter: shutdown");
 		}
 
 		// If something was considered "busy", allow start_next() to stop
@@ -51,8 +99,10 @@ void RateLimiter::async_send_impl(
 		if (m_stopping.load(std::memory_order_relaxed)) {
 			// Complete immediately on the handler's associated executor.
 			boost::asio::post(handler_ex, [h = std::move(h)]() mutable {
+				ekizu::clear_error_context();
+				ekizu::set_error_context("RateLimiter: shutdown");
 				std::move(h)(
-					make_error_code(boost::system::errc::operation_canceled));
+					ekizu::make_error_code(ekizu::errc::rate_limiter_stopped));
 			});
 			return;
 		}
@@ -79,7 +129,8 @@ void RateLimiter::start_next() {
 void RateLimiter::maybe_wait_then_send(Pending p) {
 	if (m_stopping.load(std::memory_order_relaxed)) {
 		finish_one(std::move(p),
-				   make_error_code(boost::system::errc::operation_canceled));
+				   ekizu::make_error_code(ekizu::errc::rate_limiter_stopped),
+				   "RateLimiter: shutdown");
 		return;
 	}
 
@@ -130,7 +181,8 @@ void RateLimiter::maybe_wait_then_send(Pending p) {
 			if (m_stopping.load(std::memory_order_relaxed)) {
 				finish_one(
 					std::move(p2),
-					make_error_code(boost::system::errc::operation_canceled));
+					ekizu::make_error_code(ekizu::errc::rate_limiter_stopped),
+					"RateLimiter: shutdown");
 				return;
 			}
 
@@ -147,12 +199,16 @@ void RateLimiter::maybe_wait_then_send(Pending p) {
 void RateLimiter::do_send(Pending p) {
 	if (m_stopping.load(std::memory_order_relaxed)) {
 		finish_one(std::move(p),
-				   make_error_code(boost::system::errc::operation_canceled));
+				   ekizu::make_error_code(ekizu::errc::rate_limiter_stopped),
+				   "RateLimiter: shutdown");
 		return;
 	}
 
 	if (!m_send_fn) {
-		finish_one(std::move(p), boost::system::errc::operation_not_permitted);
+		finish_one(
+			std::move(p),
+			ekizu::make_error_code(ekizu::errc::rate_limiter_send_disabled),
+			"RateLimiter: send function not set");
 		return;
 	}
 
@@ -187,10 +243,14 @@ void RateLimiter::do_send(Pending p) {
 					}
 				}
 
-				// Preserve old semantics: return response only for 2xx, else
-				// success().
+				// Return response only for 2xx; treat all other statuses as
+				// errors.
 				if (!res) {
-					finish_one(std::move(p), res.error());
+					std::string ctx = fmt::format(
+						"HTTP transport error for {} {}: {}",
+						p.req.inner.method_string(), p.req.inner.target(),
+						res.error().message());
+					finish_one(std::move(p), res.error(), std::move(ctx));
 					return;
 				}
 
@@ -201,8 +261,28 @@ void RateLimiter::do_send(Pending p) {
 					return;
 				}
 
-				finish_one(std::move(p), outcome::success());
+				const auto ec =
+					ekizu::make_error_code(map_http_status_to_errc(status));
+				finish_one(std::move(p), ec,
+						   build_http_status_context(p.req.inner, res.value()));
 			})});
+}
+
+void RateLimiter::finish_one(Pending p, Result<net::HttpResponse> result,
+							 std::string context) {
+	// Hop to the handler's associated executor.
+	boost::asio::post(
+		p.handler_ex, [h = std::move(p.handler), result = std::move(result),
+					   context = std::move(context)]() mutable {
+			ekizu::clear_error_context();
+			ekizu::set_error_context(context);
+			std::move(h)(std::move(result));
+		});
+
+	boost::asio::dispatch(m_strand, [this] {
+		m_busy = false;
+		start_next();
+	});
 }
 
 void RateLimiter::finish_one(Pending p, Result<net::HttpResponse> result) {

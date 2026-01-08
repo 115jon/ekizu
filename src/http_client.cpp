@@ -1,16 +1,18 @@
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/http_client.hpp>
 
 namespace ekizu {
 
 HttpClient::HttpClient(const boost::asio::any_io_executor &executor,
-					   std::string_view token)
+					   std::string token)
 	: m_strand{executor},
 	  m_rate_limiter{
 		  executor, [this](net::HttpRequest req,
 						   boost::asio::any_completion_handler<void(
 							   Result<net::HttpResponse>)>
 							   h) { send_http(std::move(req), std::move(h)); }},
-	  m_token{std::string(token)} {}
+	  m_token{std::move(token)} {}
 
 void HttpClient::shutdown() {
 	boost::asio::dispatch(m_strand, [this] {
@@ -150,8 +152,8 @@ UnpinMessage HttpClient::unpin_message(Snowflake channel_id,
 	return UnpinMessage{RequestSender{&m_rate_limiter}, channel_id, message_id};
 }
 
-CreateGuild HttpClient::create_guild(std::string_view name) {
-	return CreateGuild{RequestSender{&m_rate_limiter}, name};
+CreateGuild HttpClient::create_guild(std::string name) {
+	return CreateGuild{RequestSender{&m_rate_limiter}, std::move(name)};
 }
 
 GetGuild HttpClient::get_guild(Snowflake guild_id) {
@@ -175,8 +177,9 @@ GetGuildChannels HttpClient::get_guild_channels(Snowflake guild_id) {
 }
 
 CreateGuildChannel HttpClient::create_guild_channel(Snowflake guild_id,
-													std::string_view name) {
-	return CreateGuildChannel{RequestSender{&m_rate_limiter}, guild_id, name};
+													std::string name) {
+	return CreateGuildChannel{
+		RequestSender{&m_rate_limiter}, guild_id, std::move(name)};
 }
 
 ModifyGuildChannelPositions HttpClient::modify_guild_channel_positions(
@@ -204,9 +207,9 @@ SearchGuildMembers HttpClient::search_guild_members(Snowflake guild_id) {
 }
 
 AddGuildMember HttpClient::add_guild_member(
-	Snowflake guild_id, Snowflake user_id, std::string_view access_token) {
-	return AddGuildMember{
-		RequestSender{&m_rate_limiter}, guild_id, user_id, access_token};
+	Snowflake guild_id, Snowflake user_id, std::string access_token) {
+	return AddGuildMember{RequestSender{&m_rate_limiter}, guild_id, user_id,
+						  std::move(access_token)};
 }
 
 ModifyGuildMember HttpClient::modify_guild_member(Snowflake guild_id,
@@ -283,14 +286,27 @@ void HttpClient::send_http_attempt(
 	boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>
 		handler) {
 	if (!m_token) {
-		std::move(handler)(boost::system::errc::operation_not_permitted);
+		ekizu::clear_error_context();
+		ekizu::set_error_context(
+			"HttpClient: missing bot token (client shut down or not "
+			"initialized)");
+		std::move(handler)(
+			ekizu::make_error_code(ekizu::errc::http_not_authenticated));
 		return;
 	}
 
 	// Normalize request
 	req.set(net::http::field::authorization, fmt::format("Bot {}", *m_token));
 	req.set(net::http::field::host, "discord.com");
-	req.target(fmt::format("/api/v10{}", boost::to_string(req.target())));
+
+	// Normalize target (ensure leading '/' and avoid double-prefixing on
+	// retry).
+	std::string target = boost::to_string(req.target());
+	if (target.empty() || target.front() != '/') {
+		target.insert(target.begin(), '/');
+	}
+	if (target.rfind("/api/", 0) != 0) { target = "/api/v10" + target; }
+	req.target(target);
 
 	// Copy for a single retry.
 	net::HttpRequest original = req;

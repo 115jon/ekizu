@@ -2,7 +2,10 @@
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <deque>
+#include <ekizu/error.hpp>
+#include <ekizu/error_context.hpp>
 #include <ekizu/udp.hpp>
+#include <vector>
 
 namespace ekizu::net {
 using asio::ip::udp;
@@ -12,39 +15,45 @@ namespace {
 using HostPort = std::pair<std::string, std::string>;
 
 Result<HostPort> parse_host_port(std::string_view address) {
-	if (address.empty()) { return boost::system::errc::invalid_argument; }
+	if (address.empty()) {
+		return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
+	}
 
 	if (!address.empty() && address.front() == '[') {
 		auto rb = address.find(']');
 		if (rb == std::string_view::npos) {
-			return boost::system::errc::invalid_argument;
+			return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
 		}
 		auto host = address.substr(1, rb - 1);
 		auto rest = address.substr(rb + 1);
 		if (rest.size() < 2 || rest.front() != ':') {
-			return boost::system::errc::invalid_argument;
+			return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
 		}
 		auto port = rest.substr(1);
-		if (port.empty()) { return boost::system::errc::invalid_argument; }
+		if (port.empty()) {
+			return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
+		}
 		return HostPort{std::string(host), std::string(port)};
 	}
 
 	auto colon = address.rfind(':');
 	if (colon == std::string_view::npos) {
-		return boost::system::errc::invalid_argument;
+		return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
 	}
 
 	auto host = address.substr(0, colon);
 	auto port = address.substr(colon + 1);
-	if (port.empty()) { return boost::system::errc::invalid_argument; }
+	if (port.empty()) {
+		return ekizu::make_error_code(ekizu::errc::udp_invalid_address);
+	}
 
 	if (host.empty()) { host = "0.0.0.0"; }
 
 	return HostPort{std::string(host), std::string(port)};
 }
 
-inline boost::system::error_code operation_canceled_ec() {
-	return make_error_code(boost::system::errc::operation_canceled);
+inline boost::system::error_code udp_closed_ec() {
+	return ekizu::make_error_code(ekizu::errc::udp_closed);
 }
 
 }  // namespace
@@ -76,6 +85,57 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 	~Impl() { (void)close(); }
 
 	[[nodiscard]] asio::any_io_executor get_executor() const { return m_ex; }
+
+	struct PendingOp {
+		enum class Kind : uint8_t { Connected, From };
+		Kind kind{};
+		CompletionExecutor handler_ex;
+
+		asio::any_completion_handler<void(Result<std::string>)> handler_str;
+		asio::any_completion_handler<void(
+			Result<std::pair<std::string, Endpoint>>)>
+			handler_from;
+
+		static PendingOp connected(
+			asio::any_completion_handler<void(Result<std::string>)> h,
+			CompletionExecutor ex) {
+			PendingOp op;
+			op.kind = Kind::Connected;
+			op.handler_ex = std::move(ex);
+			op.handler_str = std::move(h);
+			return op;
+		}
+
+		static PendingOp from(asio::any_completion_handler<void(
+								  Result<std::pair<std::string, Endpoint>>)>
+								  h,
+							  CompletionExecutor ex) {
+			PendingOp op;
+			op.kind = Kind::From;
+			op.handler_ex = std::move(ex);
+			op.handler_from = std::move(h);
+			return op;
+		}
+
+		void complete_canceled(asio::any_io_executor net_ex) {
+			auto h_ex = handler_ex;
+			asio::post(
+				net_ex,
+				asio::bind_executor(h_ex, [op = std::move(*this)]() mutable {
+					if (op.kind == Kind::Connected) {
+						auto h = std::move(op.handler_str);
+						ekizu::clear_error_context();
+						ekizu::set_error_context("UdpSocket: closed");
+						std::move(h)(udp_closed_ec());
+					} else {
+						auto h = std::move(op.handler_from);
+						ekizu::clear_error_context();
+						ekizu::set_error_context("UdpSocket: closed");
+						std::move(h)(udp_closed_ec());
+					}
+				}));
+		}
+	};
 
 	Result<> close() {
 		std::deque<PendingOp> pending;
@@ -142,7 +202,7 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 						{
 							std::scoped_lock lk(self->impl->m_m);
 							if (self->impl->m_closing) {
-								self->finish(operation_canceled_ec());
+								self->finish(udp_closed_ec());
 								return;
 							}
 						}
@@ -163,10 +223,17 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 			void finish(boost::system::error_code ec) {
 				auto r = Result<>(outcome::success());
 				if (ec) { r = ec; }
-				asio::post(impl->m_ex,
-						   asio::bind_executor(
-							   handler_ex, [h = std::move(handler),
-											r]() mutable { std::move(h)(r); }));
+				asio::post(
+					impl->m_ex,
+					asio::bind_executor(handler_ex, [h = std::move(handler),
+													 r]() mutable {
+						if (!r && r.error() == ekizu::make_error_code(
+												   ekizu::errc::udp_closed)) {
+							ekizu::clear_error_context();
+							ekizu::set_error_context("UdpSocket: closed");
+						}
+						std::move(h)(r);
+					}));
 			}
 		};
 
@@ -189,11 +256,15 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 		}
 		if (!connected) {
 			asio::post(
-				m_ex, asio::bind_executor(
-						  handler_ex, [h = std::move(handler)]() mutable {
-							  std::move(h)(
-								  boost::system::errc::operation_not_permitted);
-						  }));
+				m_ex,
+				asio::bind_executor(
+					handler_ex, [h = std::move(handler)]() mutable {
+						ekizu::clear_error_context();
+						ekizu::set_error_context(
+							"UdpSocket: send requires connect() before send()");
+						std::move(h)(ekizu::make_error_code(
+							ekizu::errc::udp_not_connected));
+					}));
 			return;
 		}
 
@@ -286,10 +357,21 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 			}
 
 			void finish(Result<std::size_t> r) {
-				asio::post(impl->m_ex,
-						   asio::bind_executor(
-							   handler_ex, [h = std::move(handler),
-											r]() mutable { std::move(h)(r); }));
+				asio::post(
+					impl->m_ex,
+					asio::bind_executor(handler_ex, [h = std::move(handler), r,
+													 addr = address]() mutable {
+						if (!r && r.error() ==
+									  ekizu::make_error_code(
+										  ekizu::errc::udp_invalid_address)) {
+							ekizu::clear_error_context();
+							ekizu::set_error_context(
+								std::string(
+									"UdpSocket: invalid send_to address: ") +
+								addr);
+						}
+						std::move(h)(r);
+					}));
 			}
 		};
 
@@ -299,53 +381,6 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 					   self, std::move(address), data, std::move(handler),
 					   std::move(handler_ex))]() mutable { op->start(); });
 	}
-
-	struct PendingOp {
-		enum class Kind : uint8_t { Connected, From };
-		Kind kind{};
-		CompletionExecutor handler_ex;
-
-		asio::any_completion_handler<void(Result<std::string>)> handler_str;
-		asio::any_completion_handler<void(
-			Result<std::pair<std::string, Endpoint>>)>
-			handler_from;
-
-		static PendingOp connected(
-			asio::any_completion_handler<void(Result<std::string>)> h,
-			CompletionExecutor ex) {
-			PendingOp op;
-			op.kind = Kind::Connected;
-			op.handler_ex = std::move(ex);
-			op.handler_str = std::move(h);
-			return op;
-		}
-
-		static PendingOp from(asio::any_completion_handler<void(
-								  Result<std::pair<std::string, Endpoint>>)>
-								  h,
-							  CompletionExecutor ex) {
-			PendingOp op;
-			op.kind = Kind::From;
-			op.handler_ex = std::move(ex);
-			op.handler_from = std::move(h);
-			return op;
-		}
-
-		void complete_canceled(asio::any_io_executor net_ex) {
-			auto h_ex = handler_ex;
-			asio::post(
-				net_ex,
-				asio::bind_executor(h_ex, [op = std::move(*this)]() mutable {
-					if (op.kind == Kind::Connected) {
-						auto h = std::move(op.handler_str);
-						std::move(h)(operation_canceled_ec());
-					} else {
-						auto h = std::move(op.handler_from);
-						std::move(h)(operation_canceled_ec());
-					}
-				}));
-		}
-	};
 
 	void async_receive(
 		asio::any_completion_handler<void(Result<std::string>)> handler,
@@ -358,19 +393,24 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 				asio::post(
 					m_ex, asio::bind_executor(
 							  handler_ex, [h = std::move(handler)]() mutable {
-								  std::move(h)(operation_canceled_ec());
+								  ekizu::clear_error_context();
+								  ekizu::set_error_context("UdpSocket: closed");
+								  std::move(h)(udp_closed_ec());
 							  }));
 				return;
 			}
 			connected = m_connected;
 			if (!connected) {
 				asio::post(
-					m_ex,
-					asio::bind_executor(
-						handler_ex, [h = std::move(handler)]() mutable {
-							std::move(h)(
-								boost::system::errc::operation_not_permitted);
-						}));
+					m_ex, asio::bind_executor(
+							  handler_ex, [h = std::move(handler)]() mutable {
+								  ekizu::clear_error_context();
+								  ekizu::set_error_context(
+									  "UdpSocket: receive requires connect() "
+									  "before receive()");
+								  std::move(h)(ekizu::make_error_code(
+									  ekizu::errc::udp_not_connected));
+							  }));
 				return;
 			}
 
@@ -394,7 +434,9 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 				asio::post(
 					m_ex, asio::bind_executor(
 							  handler_ex, [h = std::move(handler)]() mutable {
-								  std::move(h)(operation_canceled_ec());
+								  ekizu::clear_error_context();
+								  ekizu::set_error_context("UdpSocket: closed");
+								  std::move(h)(udp_closed_ec());
 							  }));
 				return;
 			}
@@ -425,7 +467,8 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 			m_recvq.pop_front();
 		}
 
-		auto buf = std::make_shared<std::array<char, 2048>>();
+		constexpr std::size_t MAX_DATAGRAM_SIZE = 65536;
+		auto buf = std::make_shared<std::vector<char>>(MAX_DATAGRAM_SIZE);
 		auto sender = std::make_shared<Endpoint>();
 		auto self = shared_from_this();
 
@@ -440,21 +483,27 @@ struct UdpSocket::Impl : std::enable_shared_from_this<Impl> {
 					std::scoped_lock lk(self->m_m);
 					closing = self->m_closing;
 				}
-				if (ec && closing) { ec = operation_canceled_ec(); }
+				if (ec && closing) { ec = udp_closed_ec(); }
 
 				if (ec) {
 					auto h_ex = op.handler_ex;
-					asio::post(self->m_ex,
-							   asio::bind_executor(h_ex, [op = std::move(op),
-														  ec]() mutable {
-								   if (op.kind == PendingOp::Kind::Connected) {
-									   auto h = std::move(op.handler_str);
-									   std::move(h)(ec);
-								   } else {
-									   auto h = std::move(op.handler_from);
-									   std::move(h)(ec);
-								   }
-							   }));
+					asio::post(
+						self->m_ex,
+						asio::bind_executor(h_ex, [op = std::move(op),
+												   ec]() mutable {
+							if (ec == ekizu::make_error_code(
+										  ekizu::errc::udp_closed)) {
+								ekizu::clear_error_context();
+								ekizu::set_error_context("UdpSocket: closed");
+							}
+							if (op.kind == PendingOp::Kind::Connected) {
+								auto h = std::move(op.handler_str);
+								std::move(h)(ec);
+							} else {
+								auto h = std::move(op.handler_from);
+								std::move(h)(ec);
+							}
+						}));
 				} else {
 					auto msg = std::string(buf->data(), n);
 					auto ep = *sender;
@@ -515,10 +564,15 @@ void UdpSocket::bind_impl(
 	auto hp = parse_host_port(address);
 	if (!hp) {
 		asio::post(
-			ex, asio::bind_executor(handler_ex, [h = std::move(handler),
-												 e = hp.error()]() mutable {
-				std::move(h)(e);
-			}));
+			ex, asio::bind_executor(
+					handler_ex, [h = std::move(handler), e = hp.error(),
+								 addr = std::move(address)]() mutable {
+						ekizu::clear_error_context();
+						ekizu::set_error_context(
+							std::string("UdpSocket: invalid bind address: ") +
+							addr);
+						std::move(h)(e);
+					}));
 		return;
 	}
 	bind_impl(ex, std::move(hp.value().first), std::move(hp.value().second),
@@ -614,7 +668,11 @@ void UdpSocket::connect_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}
@@ -630,7 +688,11 @@ void UdpSocket::send_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}
@@ -644,7 +706,11 @@ void UdpSocket::receive_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}
@@ -659,7 +725,11 @@ void UdpSocket::send_to_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}
@@ -675,7 +745,11 @@ void UdpSocket::send_to_str_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}
@@ -691,7 +765,11 @@ void UdpSocket::receive_from_impl(
 		asio::post(
 			asio::system_executor(),
 			asio::bind_executor(handler_ex, [h = std::move(handler)]() mutable {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+				ekizu::clear_error_context();
+				ekizu::set_error_context(
+					"UdpSocket: not initialized (moved-from or not bound)");
+				std::move(h)(
+					ekizu::make_error_code(ekizu::errc::udp_not_initialized));
 			}));
 		return;
 	}

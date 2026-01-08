@@ -8,7 +8,7 @@
 namespace ekizu {
 struct GetOriginalResponse {
 	GetOriginalResponse(RequestSender sender, Snowflake application_id,
-						std::string_view interaction_token);
+						std::string interaction_token);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
 

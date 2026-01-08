@@ -87,24 +87,62 @@ if(WIN32)
     )
 endif()
 
-find_package(Boost REQUIRED COMPONENTS asio charconv filesystem url)
+# -----------------------------------------------------------------------------
+# Boost Configuration
+# -----------------------------------------------------------------------------
+option(EKIZU_USE_SYSTEM_BOOST "Use system-installed Boost instead of vcpkg" OFF)
+
+if(EKIZU_USE_SYSTEM_BOOST)
+    # Use CMake's FindBoost module for system Boost Match Boost linkage to
+    # BUILD_SHARED_LIBS
+    if(BUILD_SHARED_LIBS)
+        set(Boost_USE_STATIC_LIBS OFF)
+    else()
+        set(Boost_USE_STATIC_LIBS ON)
+    endif()
+    set(Boost_USE_MULTITHREADED ON)
+    find_package(Boost 1.86 CONFIG REQUIRED COMPONENTS filesystem coroutine)
+    # Header-only components (asio, beast, url, charconv, outcome) come via
+    # Boost::headers
+    message(STATUS "Using system Boost: ${Boost_VERSION}")
+else()
+    # Use vcpkg's Boost (CONFIG mode)
+    find_package(
+        Boost CONFIG REQUIRED COMPONENTS asio charconv filesystem coroutine url
+    )
+    message(STATUS "Using vcpkg Boost: ${Boost_VERSION}")
+endif()
+
+find_package(certify CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
-find_package(OpenSSL REQUIRED)
 find_package(Opus CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
-add_subdirectory(3rdparty/certify)
 find_package(MLSPP CONFIG REQUIRED)
 find_package(libdave CONFIG REQUIRED)
 
 target_compile_definitions(ekizu PUBLIC BOOST_ASIO_NO_DEPRECATED)
-target_link_libraries(
-    ekizu
-    PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
-    PRIVATE Boost::charconv Boost::url ZLIB::ZLIB Opus::opus
-            unofficial-sodium::sodium libdave::libdave
-)
+
+if(EKIZU_USE_SYSTEM_BOOST)
+    # System Boost: use Boost::boost for all header-only libs + include dirs
+    target_include_directories(ekizu PUBLIC ${Boost_INCLUDE_DIRS})
+    target_link_libraries(
+        ekizu
+        PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
+               Boost::coroutine
+        PRIVATE Boost::filesystem ZLIB::ZLIB Opus::opus
+                unofficial-sodium::sodium libdave::libdave
+    )
+else()
+    # vcpkg Boost: explicit targets for all libs
+    target_link_libraries(
+        ekizu
+        PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
+        PRIVATE Boost::charconv Boost::url ZLIB::ZLIB Opus::opus
+                unofficial-sodium::sodium libdave::libdave
+    )
+endif()
 
 include(GenerateExportHeader)
 
@@ -131,7 +169,7 @@ if(ekizu_INSTALL)
     include(GNUInstallDirs)
 
     install(
-        TARGETS ekizu core
+        TARGETS ekizu
         EXPORT ekizuTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

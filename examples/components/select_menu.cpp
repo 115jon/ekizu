@@ -1,7 +1,6 @@
 #include <boost/range/adaptor/transformed.hpp>
 #include <boost/range/algorithm/copy.hpp>
 #include <ekizu/async_main.hpp>
-#include <ekizu/embed_builder.hpp>
 #include <ekizu/http_client.hpp>
 #include <ekizu/shard.hpp>
 #include <nlohmann/json.hpp>
@@ -16,8 +15,8 @@ struct overload : Func... {
 template <typename... Func>
 overload(Func...) -> overload<Func...>;
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http, const asio::yield_context &yield);
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
+					  const asio::yield_context &yield);
 
 async_main(const asio::yield_context &yield) {
 	std::string token{std::getenv("DISCORD_TOKEN")};
@@ -55,8 +54,7 @@ const std::unordered_map<std::string_view, std::string_view> SELECT_OPTIONS{
 	{"kotlin", "Kotlin"}, {"java", "Java"},		{"go", "Go"},
 };
 
-Result<> handle_event(Snowflake &bot_id, const Event &ev,
-					  const HttpClient &http,
+Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 					  const asio::yield_context &yield) {
 	std::visit(
 		overload{
@@ -82,12 +80,13 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev,
 									 InteractionResponseBuilder()
 										 .type(InteractionResponseType::
 												   ChannelMessageWithSource)
-										 .embeds({EmbedBuilder()
-													  .set_title(fmt::format(
-														  "{} **is** the best!",
-														  SELECT_OPTIONS.at(
-															  data.values[0])))
-													  .build()})
+										 .embeds(
+											 {EmbedBuilder()
+												  .set_title(fmt::format(
+													  "{} **is** the best!",
+													  SELECT_OPTIONS.at(
+														  (*data.values)[0])))
+												  .build()})
 										 .flags(MessageFlags::Ephemeral)
 										 .build();
 
@@ -110,8 +109,8 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev,
 				boost::copy(SELECT_OPTIONS |
 								boost::adaptors::transformed([](const auto &p) {
 									return SelectOptionsBuilder()
-										.label(p.second)
-										.value(p.first)
+										.label(std::string{p.second})
+										.value(std::string{p.first})
 										.build();
 								}),
 							std::back_inserter(options));

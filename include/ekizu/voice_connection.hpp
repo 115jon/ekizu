@@ -7,19 +7,24 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/associated_executor.hpp>
 #include <boost/asio/experimental/channel.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/core/span.hpp>
+#include <boost/system/error_code.hpp>
+#include <cstddef>
 #include <cstdint>
-#include <ekizu/export.hpp>
-#include <ekizu/log.hpp>
-#include <ekizu/result.hpp>
-#include <ekizu/voice_state.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "ekizu/log.hpp"
+#include "ekizu/result.hpp"
+#include "ekizu/voice_state.hpp"
+#include "snowflake.hpp"
+
 namespace ekizu {
+
 namespace asio = boost::asio;
 
 /// An RTP packet the server send to the client containing the voice data.
@@ -29,6 +34,7 @@ struct Packet {
 	uint32_t timestamp{};
 	uint32_t ssrc{};
 	std::vector<std::byte> opus;
+	Snowflake user_id;
 };
 
 enum class SpeakerFlag : uint8_t {
@@ -79,6 +85,33 @@ struct VoiceConnection {
 	EKIZU_EXPORT std::optional<
 		asio::experimental::channel<void(boost::system::error_code, Packet)>> &
 	recv_chan();
+
+	// Convenience wrapper: lets users "just receive packets" without touching
+	// the channel.
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(boost::system::error_code,
+												   Packet)) CompletionToken>
+	auto receive_packet(CompletionToken &&token) {
+		auto ex = get_executor();
+		return asio::async_initiate<CompletionToken,
+									void(boost::system::error_code, Packet)>(
+			[this, ex](auto &&handler) mutable {
+				auto hex = asio::get_associated_executor(handler, ex);
+
+				auto &ch = recv_chan();
+				if (!ch) {
+					asio::post(hex, [h = std::forward<decltype(handler)>(
+										 handler)]() mutable {
+						h(make_error_code(
+							  boost::system::errc::operation_not_supported),
+						  Packet{});
+					});
+					return;
+				}
+
+				ch->async_receive(std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
 
 	EKIZU_EXPORT void attach_logger(std::function<void(const Log &)> on_log);
 
@@ -202,7 +235,6 @@ struct VoiceConnection {
 		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
 	EKIZU_EXPORT void run_impl(asio::any_completion_handler<void(Result<>)> h,
 							   CompletionExecutor hex);
-
 	EKIZU_EXPORT void send_opus_impl(
 		std::vector<std::byte> data,
 		asio::any_completion_handler<void(Result<>)> h, CompletionExecutor hex);
@@ -251,6 +283,7 @@ struct VoiceConnectionConfig {
 		asio::any_completion_handler<void(Result<VoiceConnection>)> h,
 		CompletionExecutor hex) const;
 };
+
 }  // namespace ekizu
 
 #endif	// EKIZU_VOICE_CONNECTION_HPP

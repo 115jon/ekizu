@@ -1,28 +1,63 @@
 {
+  "name": "ekizu",
+  "version": "0.1.0",
   "description": "A Discord library for C++",
   "homepage": "https://github.com/115jon/ekizu",
   "license": "MIT",
-  "name": "ekizu",
-  "version": "0.1.0",
   "dependencies": [
-    "boost-asio",
-    "boost-beast",
-    "boost-charconv",
-    "boost-coroutine2",
-    "boost-filesystem",
-    "boost-outcome",
-    "boost-url",
+    {
+      "name": "certify",
+      "default-features": false
+    },
     "fmt",
     {
       "name": "libdave",
-      "features": ["disable-logging"]
+      "features": [
+        "disable-logging"
+      ]
     },
     "libsodium",
     "nlohmann-json",
-    "openssl",
     "opus",
     "portaudio",
     "spdlog",
     "zlib"
+  ],
+  "features": {
+    "boost": {
+      "description": "Build Boost from source via vcpkg (disable to use system Boost)",
+      "dependencies": [
+        "boost-asio",
+        "boost-beast",
+        "boost-charconv",
+        "boost-coroutine",
+        "boost-filesystem",
+        "boost-outcome",
+        "boost-url",
+        {
+          "name": "certify",
+          "default-features": false,
+          "features": [
+            "boost"
+          ]
+        }
+      ]
+    },
+    "openssl": {
+      "description": "Build OpenSSL from source via vcpkg (disable to use system OpenSSL)",
+      "dependencies": [
+        {
+          "name": "certify",
+          "default-features": false,
+          "features": [
+            "openssl"
+          ]
+        }
+      ]
+    }
+  },
+  "default-features": [
+    "boost",
+    "openssl"
   ]
 }

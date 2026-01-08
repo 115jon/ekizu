@@ -16,7 +16,7 @@ namespace ekizu {
  * object.
  *
  * @see
- * https://discord.com/developers/docs/resources/channel#allowed-mentions-object
+ * [https://discord.com/developers/docs/resources/channel#allowed-mentions-object](https://discord.com/developers/docs/resources/channel#allowed-mentions-object)
  */
 struct AllowedMentions {
 	/// List of allowed mention types to parse from the content.
@@ -102,7 +102,10 @@ enum class MessageFlags : uint32_t {
 	/// This message will not trigger push and desktop notifications.
 	SuppressNotifications = 1 << 12,
 	/// This message is a voice message.
-	IsVoiceMessage = 1 << 13
+	IsVoiceMessage = 1 << 13,
+
+	/// This message uses Components V2 (containers/sections/text display, etc).
+	IsComponentsV2 = 1 << 15,
 };
 
 struct MessageInteraction {
@@ -124,7 +127,7 @@ EKIZU_EXPORT void from_json(const nlohmann::json &j, MessageInteraction &i);
 
 /**
  * @see
- * https://discord.com/developers/docs/resources/channel#message-reference-object-message-reference-structure
+ * [https://discord.com/developers/docs/resources/channel#message-reference-object-message-reference-structure](https://discord.com/developers/docs/resources/channel#message-reference-object-message-reference-structure)
  */
 struct MessageReference {
 	/// The ID of the originating message.
