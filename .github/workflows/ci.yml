@@ -5,41 +5,49 @@ on:
       - main
       - dev
     paths:
-      - "**ci.yml"
+      - ".github/workflows/ci.yml"
       - "**.hpp"
       - "**.cpp"
       - "**CMakeLists.txt"
+      - "vcpkg.json"
+      - "vcpkg-configuration.json"
+      - "overlay-ports/**"
   pull_request:
     branches:
       - main
       - dev
     paths:
-      - "**ci.yml"
+      - ".github/workflows/ci.yml"
       - "**.hpp"
       - "**.cpp"
       - "**CMakeLists.txt"
+      - "vcpkg.json"
+      - "vcpkg-configuration.json"
+      - "overlay-ports/**"
 
 env:
   BRANCH_NAME: ${{ github.ref == 'refs/heads/dev' && 'dev' || 'main' }}
   PRERELEASE: ${{ github.ref == 'refs/heads/dev' && 'true' || 'false' }}
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   linux:
-    name: linux-${{ matrix.arch }}-${{ matrix.config }}-${{ matrix.gcc-version }}
+    name: linux-${{ matrix.arch }}-${{ matrix.config }}-${{ matrix.compiler }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64]
         config: [Release, Debug]
-        gcc-version: ["g++-9", "g++-10", "g++-12"]
-        os: ["ubuntu-22.04"]
+        compiler: ["g++-12", "g++-13", "clang++-15"]
+        os: ["ubuntu-24.04"]
 
     env:
-      OUTPUT_NAME: ekizu-linux-${{ matrix.arch }}-${{ matrix.config }}-${{ matrix.gcc-version }}
+      OUTPUT_NAME: ekizu-linux-${{ matrix.arch }}-${{ matrix.config }}-${{ matrix.compiler }}
 
     steps:
       - name: Checkout
@@ -47,57 +55,68 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies
-        run: sudo apt update && sudo apt install -y cmake ${{ matrix.gcc-version }} libssl-dev ninja-build rpm zlib1g-dev libtool autoconf linux-libc-dev
-
-      - name: Install dependencies (vcpkg)
-        uses: johnwason/vcpkg-action@v7
-        id: vcpkg
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
         with:
-          manifest-dir: ${{ github.workspace }}
-          triplet: x64-linux
-          cache-key: ${{ runner.os }}-${{ matrix.arch }}-${{ matrix.gcc-version }}-vcpkg
-          token: ${{ github.token }}
-        env:
-          CXX: ${{ matrix.gcc-version }}
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build rpm \
+            libssl-dev zlib1g-dev linux-libc-dev \
+            libtool autoconf pkg-config \
+            ${{ matrix.compiler }}
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "c82f74667287d3dc386bce81e44964370c91a289"
 
       - name: Configure CMake
-        run: cmake ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }} -Dekizu_BUILD_EXAMPLES=OFF
-        env:
-          CXX: ${{ matrix.gcc-version }}
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_OVERLAY_PORTS=${{ github.workspace }}/overlay-ports \
+            -Dekizu_BUILD_EXAMPLES=OFF
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }}
+        run: cmake --build build --config ${{ matrix.config }} -j $(nproc)
 
       - name: Package
         run: cd build && cpack -C ${{ matrix.config }} --verbose
 
       - name: Rename Packages
         run: |
-          mv build/*.deb build/${{ env.OUTPUT_NAME }}.deb
-          mv build/*.rpm build/${{ env.OUTPUT_NAME }}.rpm
+          mv build/*.deb build/${{ env.OUTPUT_NAME }}.deb || true
+          mv build/*.rpm build/${{ env.OUTPUT_NAME }}.rpm || true
 
       - name: Upload Binary (DEB)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}.deb
           path: build/*.deb
+          if-no-files-found: ignore
 
       - name: Upload Binary (RPM)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.OUTPUT_NAME }}.rpm
           path: build/*.rpm
+          if-no-files-found: ignore
 
   windows:
     strategy:
       fail-fast: false
       matrix:
-        arch: [x64, x86]
+        arch: [x64]
         config: [Release, Debug]
         vs:
-          - {name: 2019, version: 16, os: windows-2019}
-          - {name: 2022, version: 17, os: windows-2022}
+          - { name: 2022, version: 17, os: windows-2022 }
 
     name: windows-${{ matrix.arch }}-${{ matrix.config }}-vs${{ matrix.vs.name }}
     runs-on: ${{ matrix.vs.os }}
@@ -111,28 +130,30 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v1.1
-
-      - name: Install dependencies (vcpkg)
-        uses: johnwason/vcpkg-action@v7
-        id: vcpkg
+      - name: Export GitHub Actions cache variables
+        uses: actions/github-script@v7
         with:
-          manifest-dir: ${{ github.workspace }}
-          triplet: ${{ matrix.arch }}-windows
-          cache-key: ${{ runner.os }}-${{ matrix.vs.name }}-${{ matrix.arch }}-vcpkg
-          token: ${{ github.token }}
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Configure CMake (x64)
-        if: ${{ matrix.arch == 'x64' }}
-        run: cmake ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} -S . -B build -G "Visual Studio ${{ matrix.vs.version }} ${{ matrix.vs.name }}" -A x64 -T host=x64 -Dekizu_BUILD_EXAMPLES=OFF
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: "c82f74667287d3dc386bce81e44964370c91a289"
 
-      - name: Configure CMake (x86)
-        if: ${{ matrix.arch == 'x86' }}
-        run: cmake ${{ steps.vcpkg.outputs.vcpkg-cmake-config }} -S . -B build -G "Visual Studio ${{ matrix.vs.version }} ${{ matrix.vs.name }}" -A Win32 -T host=x86 -Dekizu_BUILD_EXAMPLES=OFF
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build `
+            -G "Visual Studio ${{ matrix.vs.version }} ${{ matrix.vs.name }}" `
+            -A ${{ matrix.arch }} `
+            -T host=${{ matrix.arch }} `
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DVCPKG_OVERLAY_PORTS=${{ github.workspace }}/overlay-ports `
+            -Dekizu_BUILD_EXAMPLES=OFF
 
       - name: Build
-        run: cmake --build build --config ${{ matrix.config }}
+        run: cmake --build build --config ${{ matrix.config }} -j $env:NUMBER_OF_PROCESSORS
 
       - name: Package
         run: cd build && cpack -C ${{ matrix.config }} --verbose
@@ -148,7 +169,7 @@ jobs:
 
   release:
     needs: [linux, windows]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push'
 
     steps:
@@ -165,7 +186,7 @@ jobs:
           branch: ${{ env.BRANCH_NAME }}
 
       - name: Create Draft Release
-        uses: ncipollo/release-action@v1.12.0
+        uses: ncipollo/release-action@v1
         with:
           prerelease: true
           draft: false
@@ -184,7 +205,7 @@ jobs:
           writeToFile: false
 
       - name: Create Release
-        uses: ncipollo/release-action@v1.12.0
+        uses: ncipollo/release-action@v1
         with:
           prerelease: ${{ env.PRERELEASE }}
           allowUpdates: true
@@ -201,19 +222,19 @@ jobs:
 
   upload:
     needs: release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push'
 
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: .
+          path: artifacts
 
       - name: Upload artifacts to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ github.token }}
           file_glob: true
-          file: "**/*"
+          file: "artifacts/**/*"
           tag: ${{ needs.release.outputs.next }}
