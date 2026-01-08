@@ -5,14 +5,35 @@
   "version-string": "c0cf6449724082488aeb9d9c5398fe1c131abb04",
   "dependencies": [
     "gtest",
-    "mlspp",
-    "openssl",
-    "vcpkg-cmake",
-    "vcpkg-cmake-config"
+    {
+      "name": "mlspp",
+      "default-features": false
+    },
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    }
   ],
   "features": {
     "disable-logging": {
       "description": "Disable all logging for zero runtime overhead"
+    },
+    "openssl": {
+      "description": "Build OpenSSL from source (disable for system OpenSSL)",
+      "dependencies": [
+        "openssl",
+        {
+          "name": "mlspp",
+          "default-features": false,
+          "features": [
+            "openssl"
+          ]
+        }
+      ]
     }
   }
 }

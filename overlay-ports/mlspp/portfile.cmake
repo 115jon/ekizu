@@ -7,11 +7,19 @@ vcpkg_from_github(
         fix-windows-internal-libs-static.patch
 )
 
+# GCC 15+ has false positive maybe-uninitialized warnings with std::variant
+if(VCPKG_TARGET_IS_LINUX OR VCPKG_TARGET_IS_OSX OR VCPKG_TARGET_IS_FREEBSD)
+    set(EXTRA_CXX_FLAGS "-Wno-error=maybe-uninitialized")
+else()
+    set(EXTRA_CXX_FLAGS "")
+endif()
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DDISABLE_GREASE=ON
         -DMLS_CXX_NAMESPACE="mlspp"
+        "-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS} ${EXTRA_CXX_FLAGS}"
 )
 
 vcpkg_cmake_install()
