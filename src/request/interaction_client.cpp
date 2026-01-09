@@ -16,4 +16,9 @@ GetOriginalResponse InteractionClient::get_original_response(
 	Snowflake application_id, std::string interaction_token) const {
 	return {m_sender, m_application_id, std::move(interaction_token)};
 }
+
+EditOriginalResponse InteractionClient::edit_original_response(
+	std::string interaction_token) const {
+	return {m_sender, m_application_id, std::move(interaction_token)};
+}
 }  // namespace ekizu

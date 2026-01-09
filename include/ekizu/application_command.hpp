@@ -143,6 +143,127 @@ struct ApplicationCommandOption {
 };
 
 /**
+ * @brief Builder for ApplicationCommandOption with a fluent interface.
+ *
+ * Example usage:
+ * @code
+ * auto option = ekizu::ApplicationCommandOptionBuilder()
+ *     .type(ekizu::ApplicationCommandOptionType::String)
+ *     .name("query")
+ *     .description("The search query")
+ *     .required(true)
+ *     .min_length(1)
+ *     .max_length(100)
+ *     .build();
+ * @endcode
+ */
+struct ApplicationCommandOptionBuilder {
+	[[nodiscard]] ApplicationCommandOption build() const { return m_option; }
+
+	ApplicationCommandOptionBuilder &type(ApplicationCommandOptionType t) {
+		m_option.type = t;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &name(std::string n) {
+		m_option.name = std::move(n);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &name_localizations(
+		std::map<std::string, std::string> locs) {
+		m_option.name_localizations = std::move(locs);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &description(std::string d) {
+		m_option.description = std::move(d);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &description_localizations(
+		std::map<std::string, std::string> locs) {
+		m_option.description_localizations = std::move(locs);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &required(bool r) {
+		m_option.required = r;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &choices(
+		std::vector<ApplicationCommandOptionChoice> c) {
+		m_option.choices = std::move(c);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &add_choice(
+		std::string name, ApplicationCommandOptionChoiceValue value) {
+		if (!m_option.choices) { m_option.choices.emplace(); }
+		m_option.choices->push_back(ApplicationCommandOptionChoice{
+			std::move(name), {}, std::move(value)});
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &options(
+		std::vector<ApplicationCommandOption> opts) {
+		m_option.options = std::move(opts);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &add_option(ApplicationCommandOption opt) {
+		if (!m_option.options) { m_option.options.emplace(); }
+		m_option.options->push_back(std::move(opt));
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &channel_types(
+		std::vector<ChannelType> ct) {
+		m_option.channel_types = std::move(ct);
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &min_value(int64_t v) {
+		m_option.min_value = v;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &min_value(double v) {
+		m_option.min_value = v;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &max_value(int64_t v) {
+		m_option.max_value = v;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &max_value(double v) {
+		m_option.max_value = v;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &min_length(int len) {
+		m_option.min_length = len;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &max_length(int len) {
+		m_option.max_length = len;
+		return *this;
+	}
+
+	ApplicationCommandOptionBuilder &autocomplete(bool ac) {
+		m_option.autocomplete = ac;
+		return *this;
+	}
+
+   private:
+	ApplicationCommandOption m_option;
+};
+
+/**
  * @brief Represents an Application Command.
  * @see
  * https://discord.com/developers/docs/interactions/application-commands#application-command-object-application-command-structure

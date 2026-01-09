@@ -2,6 +2,7 @@
 #define EKIZU_REQUEST_INTERACTION_CLIENT_HPP
 
 #include <ekizu/request/interaction/create_response.hpp>
+#include <ekizu/request/interaction/edit_original_response.hpp>
 #include <ekizu/request/interaction/get_original_response.hpp>
 #include <ekizu/request/request_sender.hpp>
 
@@ -17,6 +18,11 @@ struct InteractionClient {
 
 	[[nodiscard]] EKIZU_EXPORT GetOriginalResponse get_original_response(
 		Snowflake application_id, std::string interaction_token) const;
+
+	/// Edit the initial response to an interaction.
+	/// https://discord.com/developers/docs/interactions/receiving-and-responding#edit-original-interaction-response
+	[[nodiscard]] EKIZU_EXPORT EditOriginalResponse
+	edit_original_response(std::string interaction_token) const;
 
    private:
 	Snowflake m_application_id;

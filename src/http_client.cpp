@@ -270,6 +270,23 @@ InteractionClient HttpClient::interaction(Snowflake application_id) {
 	return InteractionClient{RequestSender{&m_rate_limiter}, application_id};
 }
 
+BulkOverwriteGlobalApplicationCommands
+HttpClient::bulk_overwrite_global_application_commands(
+	Snowflake application_id,
+	std::vector<ApplicationCommandCreateFields> commands) {
+	return BulkOverwriteGlobalApplicationCommands{
+		RequestSender{&m_rate_limiter}, application_id, std::move(commands)};
+}
+
+BulkOverwriteGuildApplicationCommands
+HttpClient::bulk_overwrite_guild_application_commands(
+	Snowflake application_id, Snowflake guild_id,
+	std::vector<ApplicationCommandCreateFields> commands) {
+	return BulkOverwriteGuildApplicationCommands{
+		RequestSender{&m_rate_limiter}, application_id, guild_id,
+		std::move(commands)};
+}
+
 void HttpClient::send_http(
 	net::HttpRequest req,
 	boost::asio::any_completion_handler<void(Result<net::HttpResponse>)>

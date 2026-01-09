@@ -5,6 +5,7 @@
 #include <ekizu/request/add_guild_member.hpp>
 #include <ekizu/request/add_guild_member_role.hpp>
 #include <ekizu/request/bulk_delete_messages.hpp>
+#include <ekizu/request/bulk_overwrite_application_commands.hpp>
 #include <ekizu/request/create_dm.hpp>
 #include <ekizu/request/create_guild.hpp>
 #include <ekizu/request/create_guild_channel.hpp>
@@ -163,6 +164,16 @@ struct HttpClient {
 	[[nodiscard]] EKIZU_EXPORT CreateDM create_dm(Snowflake user_id);
 	[[nodiscard]] EKIZU_EXPORT InteractionClient
 	interaction(Snowflake application_id);
+
+	// Application Commands
+	[[nodiscard]] EKIZU_EXPORT BulkOverwriteGlobalApplicationCommands
+	bulk_overwrite_global_application_commands(
+		Snowflake application_id,
+		std::vector<ApplicationCommandCreateFields> commands);
+	[[nodiscard]] EKIZU_EXPORT BulkOverwriteGuildApplicationCommands
+	bulk_overwrite_guild_application_commands(
+		Snowflake application_id, Snowflake guild_id,
+		std::vector<ApplicationCommandCreateFields> commands);
 
    private:
 	// Low-level async send used by RateLimiter; completion handler will be
