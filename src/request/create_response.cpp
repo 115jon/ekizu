@@ -49,10 +49,13 @@ CreateResponse::CreateResponse(RequestSender sender, Snowflake interaction_id,
 	  m_response{std::move(response)} {}
 
 CreateResponse::operator net::HttpRequest() const {
-	net::HttpRequest req{net::HttpMethod::post,
-						 fmt::format("/interactions/{}/{}/callback",
-									 m_interaction_id, m_interaction_token),
-						 11, static_cast<nlohmann::json>(m_response).dump()};
+	net::HttpRequest req{
+		net::HttpMethod::post,
+		fmt::format("/interactions/{}/{}/callback", m_interaction_id,
+					m_interaction_token),
+		11,
+		static_cast<nlohmann::json>(m_response)
+			.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

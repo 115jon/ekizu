@@ -87,7 +87,8 @@ EditMessage::operator net::HttpRequest() const {
 				j.erase("attachments");
 			}
 
-			body = j.dump();
+			body = j.dump(
+				-1, ' ', false, nlohmann::json::error_handler_t::replace);
 		}
 
 		auto req = net::HttpRequest{
@@ -140,7 +141,9 @@ EditMessage::operator net::HttpRequest() const {
 	}
 
 	std::string multipart_body = detail::encode_multipart_form_data(
-		boundary, payload.dump(), m_upload_attachments);
+		boundary,
+		payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace),
+		m_upload_attachments);
 
 	auto req = net::HttpRequest{
 		net::HttpMethod::patch,

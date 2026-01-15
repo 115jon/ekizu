@@ -55,7 +55,8 @@ ModifyChannel::ModifyChannel(RequestSender sender, Snowflake channel_id)
 ModifyChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{
 		net::HttpMethod::patch, fmt::format("/channels/{}", m_channel_id), 11,
-		static_cast<nlohmann::json>(m_fields).dump()};
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

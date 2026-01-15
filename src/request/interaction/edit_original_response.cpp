@@ -3,7 +3,6 @@
 #include <ekizu/json_util.hpp>
 #include <ekizu/request/interaction/edit_original_response.hpp>
 
-
 namespace ekizu {
 EditOriginalResponse::EditOriginalResponse(RequestSender sender,
 										   Snowflake application_id,
@@ -25,10 +24,12 @@ EditOriginalResponse::operator net::HttpRequest() const {
 			static_cast<std::underlying_type_t<MessageFlags>>(*m_flags);
 	}
 
-	net::HttpRequest req{net::HttpMethod::patch,
-						 fmt::format("/webhooks/{}/{}/messages/@original",
-									 m_application_id, m_interaction_token),
-						 11, body.dump()};
+	net::HttpRequest req{
+		net::HttpMethod::patch,
+		fmt::format("/webhooks/{}/{}/messages/@original", m_application_id,
+					m_interaction_token),
+		11,
+		body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();
 	return req;

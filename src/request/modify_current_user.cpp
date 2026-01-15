@@ -17,8 +17,10 @@ void from_json(const nlohmann::json &j, ModifyCurrentUserFields &f) {
 ModifyCurrentUser::ModifyCurrentUser(RequestSender sender) : m_sender{sender} {}
 
 ModifyCurrentUser::operator net::HttpRequest() const {
-	net::HttpRequest req{net::HttpMethod::patch, "/users/@me", 11,
-						 static_cast<nlohmann::json>(m_fields).dump()};
+	net::HttpRequest req{
+		net::HttpMethod::patch, "/users/@me", 11,
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

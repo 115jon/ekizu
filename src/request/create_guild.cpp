@@ -61,8 +61,10 @@ CreateGuild::CreateGuild(RequestSender sender, std::string name)
 	: m_fields{std::move(name)}, m_sender{sender} {}
 
 CreateGuild::operator net::HttpRequest() const {
-	net::HttpRequest req{net::HttpMethod::post, "/guilds", 11,
-						 static_cast<nlohmann::json>(m_fields).dump()};
+	net::HttpRequest req{
+		net::HttpMethod::post, "/guilds", 11,
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

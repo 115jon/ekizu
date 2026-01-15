@@ -64,7 +64,8 @@ ModifyGuild::operator net::HttpRequest() const {
 	// Create and return the HTTP request
 	net::HttpRequest req{
 		net::HttpMethod::patch, fmt::format("/guilds/{}", m_guild_id), 11,
-		static_cast<nlohmann::json>(m_fields).dump()};
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

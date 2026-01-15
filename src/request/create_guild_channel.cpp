@@ -58,7 +58,9 @@ CreateGuildChannel::CreateGuildChannel(RequestSender sender, Snowflake guild_id,
 CreateGuildChannel::operator net::HttpRequest() const {
 	net::HttpRequest req{
 		net::HttpMethod::post, fmt::format("/guilds/{}/channels", m_guild_id),
-		11, static_cast<nlohmann::json>(m_fields).dump()};
+		11,
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();

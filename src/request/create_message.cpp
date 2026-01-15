@@ -66,7 +66,8 @@ CreateMessage::operator net::HttpRequest() const {
 		} else {
 			auto j = static_cast<nlohmann::json>(m_fields);
 			j.erase("payload_json");
-			body = j.dump();
+			body = j.dump(
+				-1, ' ', false, nlohmann::json::error_handler_t::replace);
 		}
 
 		net::HttpRequest req{net::HttpMethod::post,
@@ -99,7 +100,9 @@ CreateMessage::operator net::HttpRequest() const {
 		attachments_json_from_uploads(m_upload_attachments);
 
 	std::string multipart_body = detail::encode_multipart_form_data(
-		boundary, payload.dump(), m_upload_attachments);
+		boundary,
+		payload.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace),
+		m_upload_attachments);
 
 	net::HttpRequest req{net::HttpMethod::post,
 						 fmt::format("/channels/{}/messages", m_channel_id), 11,

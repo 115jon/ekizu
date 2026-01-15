@@ -13,9 +13,11 @@ ModifyCurrentMember::ModifyCurrentMember(RequestSender sender,
 	: m_guild_id{guild_id}, m_sender{sender} {}
 
 ModifyCurrentMember::operator net::HttpRequest() const {
-	net::HttpRequest req{net::HttpMethod::patch,
-						 fmt::format("/guilds/{}/members/@me", m_guild_id), 11,
-						 static_cast<nlohmann::json>(m_fields).dump()};
+	net::HttpRequest req{
+		net::HttpMethod::patch,
+		fmt::format("/guilds/{}/members/@me", m_guild_id), 11,
+		static_cast<nlohmann::json>(m_fields).dump(
+			-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
 	req.set(net::http::field::content_type, "application/json");
 	req.prepare_payload();
