@@ -62,16 +62,16 @@ struct InteractionResponseBuilder {
 		return *this;
 	}
 
-	InteractionResponseBuilder &embeds(const std::vector<Embed> &embeds) {
+	InteractionResponseBuilder &embeds(std::vector<Embed> embeds) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->embeds = embeds;
+		m_response.data->embeds = std::move(embeds);
 		return *this;
 	}
 
 	InteractionResponseBuilder &allowed_mentions(
-		const AllowedMentions &allowed_mentions) {
+		AllowedMentions allowed_mentions) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->allowed_mentions = allowed_mentions;
+		m_response.data->allowed_mentions = std::move(allowed_mentions);
 		return *this;
 	}
 
@@ -82,23 +82,23 @@ struct InteractionResponseBuilder {
 	}
 
 	InteractionResponseBuilder &components(
-		const std::vector<MessageComponent> &components) {
+		std::vector<MessageComponent> components) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->components = components;
+		m_response.data->components = std::move(components);
 		return *this;
 	}
 
 	InteractionResponseBuilder &attachments(
-		const std::vector<PartialAttachment> &attachments) {
+		std::vector<PartialAttachment> attachments) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->attachments = attachments;
+		m_response.data->attachments = std::move(attachments);
 		return *this;
 	}
 
 	InteractionResponseBuilder &choices(
-		const std::vector<ApplicationCommandOptionChoice> &choices) {
+		std::vector<ApplicationCommandOptionChoice> choices) {
 		if (!m_response.data) { m_response.data.emplace(); }
-		m_response.data->choices = choices;
+		m_response.data->choices = std::move(choices);
 		return *this;
 	}
 
