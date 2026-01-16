@@ -186,7 +186,7 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 				impl->m_recv_chan->async_send(
 					boost::system::error_code{}, std::move(pkt),
 					[impl = impl](boost::system::error_code ec) {
-						if (ec) {
+						if (ec && !impl->m_disconnected) {
 							impl->log(fmt::format("Channel send failed: {}",
 												  ec.message()),
 									  LogLevel::Warn);
@@ -213,7 +213,7 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 			impl->m_recv_chan->async_send(
 				boost::system::error_code{}, std::move(pkt),
 				[impl = impl](boost::system::error_code ec) {
-					if (ec) {
+					if (ec && !impl->m_disconnected) {
 						impl->log(fmt::format(
 									  "Channel send failed: {}", ec.message()),
 								  LogLevel::Warn);

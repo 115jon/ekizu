@@ -24,6 +24,9 @@ void VoiceConnection::Impl::heartbeat_tick() {
 		if (!self->m_last_heartbeat_acked) {
 			self->log("Connection may be dead (heartbeat ack missing)",
 					  LogLevel::Warn);
+			self->m_heartbeat_running = false;
+			self->m_disconnected = true;
+			return;
 		}
 		self->m_last_heartbeat_acked = false;
 
