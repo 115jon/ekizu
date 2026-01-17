@@ -1,7 +1,9 @@
+#include <boost/asio/error.hpp>
 #include <ekizu/voice_connection.hpp>
 
 #include "voice_connection_impl.hpp"
 #include "voice_util.hpp"
+
 
 namespace ekizu {
 
@@ -15,8 +17,8 @@ void VoiceConnection::Impl::send_opus(
 			std::move(h)(boost::system::errc::invalid_argument);
 			return;
 		}
-		if (!self->m_channel) {
-			std::move(h)(boost::system::errc::operation_not_permitted);
+		if (!self->m_channel || self->m_disconnected) {
+			std::move(h)(boost::asio::error::not_connected);
 			return;
 		}
 
@@ -52,8 +54,8 @@ void VoiceConnection::Impl::send_raw(
 				std::move(h)(boost::system::errc::invalid_argument);
 				return;
 			}
-			if (!self->m_channel) {
-				std::move(h)(boost::system::errc::operation_not_permitted);
+			if (!self->m_channel || self->m_disconnected) {
+				std::move(h)(boost::asio::error::not_connected);
 				return;
 			}
 

@@ -34,6 +34,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 							close_reason->code, close_reason->reason);
 					}
 					me->impl->log(msg, LogLevel::Error);
+					me->impl->m_disconnected = true;
 					return;
 				}
 
