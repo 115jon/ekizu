@@ -34,7 +34,21 @@ void VoiceConnection::Impl::ws_listen_loop() {
 							close_reason->code, close_reason->reason);
 					}
 					me->impl->log(msg, LogLevel::Error);
-					me->impl->m_disconnected = true;
+
+					// Check if we can resume based on close code
+					uint16_t close_code =
+						close_reason ? static_cast<uint16_t>(close_reason->code)
+									 : 1006;  // Abnormal closure
+
+					if (is_resumable_close_code(close_code) &&
+						me->impl->m_connection_state ==
+							VoiceConnectionState::Ready) {
+						me->impl->initiate_reconnect();
+					} else {
+						me->impl->m_connection_state =
+							VoiceConnectionState::Closed;
+						me->impl->m_disconnected = true;
+					}
 					return;
 				}
 
@@ -76,31 +90,46 @@ void VoiceConnection::Impl::ws_listen_loop() {
 						case VoiceOpcode::Hello: {
 							me->impl->setup_heartbeat(data);
 
-							nlohmann::json id_payload{
-								{"op",
-								 static_cast<uint8_t>(VoiceOpcode::Identify)},
-								{"d",
-								 {{"server_id",
-								   fmt::to_string(*me->impl->m_state.guild_id)},
-								  {"user_id",
-								   fmt::to_string(me->impl->m_state.user_id)},
-								  {"session_id", me->impl->m_state.session_id},
-								  {"token", me->impl->m_token},
-								  {"max_dave_protocol_version",
-								   discord::dave::
-									   MaxSupportedProtocolVersion()}}}};
+							// Check if we're resuming or identifying
+							const bool resuming =
+								(me->impl->m_connection_state ==
+								 VoiceConnectionState::Resuming);
 
-							if (me->impl->m_disconnected) {
-								id_payload["op"] =
-									static_cast<uint8_t>(VoiceOpcode::Resume);
-								id_payload["d"] = {
-									{"server_id",
-									 fmt::to_string(
-										 *me->impl->m_state.guild_id)},
-									{"session_id",
-									 me->impl->m_state.session_id},
-									{"token", me->impl->m_token}};
-								me->impl->m_disconnected = false;
+							nlohmann::json id_payload;
+							if (resuming) {
+								me->impl->log("Sending Resume", LogLevel::Info);
+								id_payload = {
+									{"op",
+									 static_cast<uint8_t>(VoiceOpcode::Resume)},
+									{"d",
+									 {{"server_id",
+									   fmt::to_string(
+										   *me->impl->m_state.guild_id)},
+									  {"session_id",
+									   me->impl->m_state.session_id},
+									  {"token", me->impl->m_token},
+									  {"seq_ack", me->impl->m_last_seq}}}};
+							} else {
+								me->impl->log(
+									"Sending Identify", LogLevel::Info);
+								me->impl->m_connection_state =
+									VoiceConnectionState::Identifying;
+								id_payload = {
+									{"op", static_cast<uint8_t>(
+											   VoiceOpcode::Identify)},
+									{"d",
+									 {{"server_id",
+									   fmt::to_string(
+										   *me->impl->m_state.guild_id)},
+									  {"user_id",
+									   fmt::to_string(
+										   me->impl->m_state.user_id)},
+									  {"session_id",
+									   me->impl->m_state.session_id},
+									  {"token", me->impl->m_token},
+									  {"max_dave_protocol_version",
+									   discord::dave::
+										   MaxSupportedProtocolVersion()}}}};
 							}
 
 							me->impl->m_ws->send(
@@ -108,6 +137,15 @@ void VoiceConnection::Impl::ws_listen_loop() {
 								[me](Result<>) mutable { me->step(); });
 							return;
 						}
+
+						case VoiceOpcode::Resumed:
+							me->impl->log(
+								"Resumed successfully", LogLevel::Info);
+							me->impl->m_connection_state =
+								VoiceConnectionState::Ready;
+							me->impl->m_missed_heartbeats = 0;
+							me->impl->m_disconnected = false;
+							break;
 
 						case VoiceOpcode::Speaking: {
 							// Track user SSRCs for voice receiving

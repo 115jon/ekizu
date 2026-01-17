@@ -26,11 +26,60 @@
 
 namespace ekizu {
 
-// Audio packet structure for internal transmission
 struct AudioPacket {
 	std::vector<std::byte> encoded;
 	size_t frame_count{};
 };
+
+enum class VoiceConnectionState : uint8_t {
+	Disconnected,
+	Connecting,
+	Identifying,
+	Ready,
+	Resuming,
+	Closed
+};
+
+constexpr int kMaxMissedHeartbeats = 3;
+
+// Discord Voice Close Event Codes (per Discord API docs)
+enum class VoiceCloseCode : uint16_t {
+	UnknownOpcode = 4001,
+	FailedToDecodePayload = 4002,
+	NotAuthenticated = 4003,
+	AuthenticationFailed = 4004,
+	AlreadyAuthenticated = 4005,
+	SessionNoLongerValid = 4006,
+	SessionTimeout = 4009,
+	ServerNotFound = 4011,
+	UnknownProtocol = 4012,
+	Disconnected = 4014,
+	VoiceServerCrashed = 4015,
+	UnknownEncryptionMode = 4016
+};
+
+// Check if a close code allows resuming the session
+inline bool should_resume(VoiceCloseCode code) {
+	switch (code) {
+		case VoiceCloseCode::VoiceServerCrashed:
+			return true;		// Try resuming per Discord docs
+		default: return false;	// Cannot resume, need new session
+	}
+}
+
+// Check if a raw close code is resumable
+inline bool is_resumable_close_code(uint16_t code) {
+	// Standard WebSocket close codes (<4000) are generally resumable
+	if (code < 4000) { return true; }
+
+	// Check known Discord voice close codes
+	if (code >= 4001 && code <= 4016) {
+		return should_resume(static_cast<VoiceCloseCode>(code));
+	}
+
+	// Unknown codes - attempt resume
+	return true;
+}
 
 // Voice connection implementation
 struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
@@ -87,6 +136,10 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 	// Audio reception (from voice_receiver.cpp)
 	void udp_receiver_loop();
 	void on_speaking(std::string user_id, uint32_t ssrc, bool speaking);
+
+	// Reconnection (from voice_reconnect.cpp)
+	void initiate_reconnect();
+	void connect_ws_async(asio::any_completion_handler<void(Result<>)> h);
 
 	// DAVE/MLS handling (from voice_dave_handler.cpp)
 	void handle_binary_event_async(
@@ -156,9 +209,11 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 	std::unique_ptr<Codec> m_codec;
 
 	// Connection state
+	VoiceConnectionState m_connection_state{VoiceConnectionState::Disconnected};
 	bool m_disconnected{false};
 	bool m_speaking{false};
 	std::function<void(const Log &)> m_on_log;
+	int m_missed_heartbeats{0};
 
 	// Sender state
 	std::optional<asio::steady_timer> m_send_timer;

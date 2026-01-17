@@ -22,11 +22,20 @@ void VoiceConnection::Impl::heartbeat_tick() {
 		if (ec || !self->m_heartbeat_running) { return; }
 
 		if (!self->m_last_heartbeat_acked) {
-			self->log("Connection may be dead (heartbeat ack missing)",
-					  LogLevel::Warn);
-			self->m_heartbeat_running = false;
-			self->m_disconnected = true;
-			return;
+			++self->m_missed_heartbeats;
+			self->log(
+				fmt::format("Missed heartbeat ACK ({}/{})",
+							self->m_missed_heartbeats, kMaxMissedHeartbeats),
+				LogLevel::Warn);
+
+			if (self->m_missed_heartbeats >= kMaxMissedHeartbeats) {
+				self->log(
+					"Connection dead, initiating reconnect", LogLevel::Error);
+				self->initiate_reconnect();
+				return;
+			}
+		} else {
+			self->m_missed_heartbeats = 0;
 		}
 		self->m_last_heartbeat_acked = false;
 
