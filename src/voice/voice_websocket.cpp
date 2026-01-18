@@ -74,6 +74,9 @@ void VoiceConnection::Impl::ws_listen_loop() {
 						static_cast<VoiceOpcode>(data["op"].get<int>());
 					switch (opcode) {
 						case VoiceOpcode::Ready:
+							me->impl->m_disconnected = false;
+							me->impl->m_connection_state =
+								VoiceConnectionState::Ready;
 							me->impl->setup_udp_async(
 								data, [me](Result<>) mutable { me->step(); });
 							return;
@@ -209,94 +212,142 @@ void VoiceConnection::Impl::ws_listen_loop() {
 
 						case VoiceOpcode::DavePrepareTransition: {
 							// Handle dave_protocol_prepare_transition opcode
-							// (21) When transition_id = 0, this signals sole
-							// member initialization
-							if (data["d"].contains("transition_id") &&
-								data["d"]["transition_id"].is_number()) {
-								uint16_t transition_id =
-									data["d"]["transition_id"].get<uint16_t>();
-
-								if (transition_id == 0) {
-									// Sole member reset: activate the pending
-									// group immediately
-									me->impl->log(
-										"Received sole member init "
-										"(transition_id=0), activating pending "
-										"group",
-										LogLevel::Info);
-
-									if (me->impl->m_dave_manager
-											->commit_pending_group()) {
-										me->impl->log(
-											"Successfully activated pending "
-											"group for sole member",
-											LogLevel::Info);
-
-										// Execute the transition to install
-										// sender ratchet
-										me->impl
-											->execute_dave_transition_now_async(
-												me->impl->m_dave_manager
-													->protocol_version(),
-												[me](Result<>) mutable {
-													me->step();
-												});
-										return;
-									}
-									me->impl->log(
-										"Failed to activate pending group",
-										LogLevel::Error);
-								}
+							// (21)
+							if (!data["d"].contains("transition_id") ||
+								!data["d"]["transition_id"].is_number()) {
+								break;
 							}
-							break;
+
+							uint16_t transition_id =
+								data["d"]["transition_id"].get<uint16_t>();
+							int protocol_version =
+								data["d"].contains("protocol_version")
+									? data["d"]["protocol_version"].get<int>()
+									: me->impl->m_dave_manager
+										  ->protocol_version();
+
+							me->impl->log(
+								fmt::format("Received DavePrepareTransition: "
+											"tid={}, version={}",
+											transition_id, protocol_version),
+								LogLevel::Info);
+
+							// Store pending transition version
+							me->impl
+								->m_dave_transition_versions[transition_id] =
+								protocol_version;
+
+							// transition_id = 0 means immediate execution
+							if (transition_id == 0) {
+								if (me->impl->m_dave_manager
+										->commit_pending_group()) {
+									me->impl->log(
+										"Activated pending group for sole "
+										"member",
+										LogLevel::Info);
+									me->impl->execute_dave_transition_now_async(
+										protocol_version,
+										[me](Result<>) mutable { me->step(); });
+									return;
+								}
+								me->impl->log(
+									"Failed to activate pending group",
+									LogLevel::Error);
+								break;
+							}
+
+							// Downgrade to transport-only encryption
+							if (protocol_version == 0) {
+								me->impl->log(
+									"Preparing for downgrade to passthrough",
+									LogLevel::Info);
+								// Enable passthrough on receive side now
+								me->impl->m_dave_manager->set_passthrough_mode(
+									true);
+							}
+
+							// Send ready_for_transition acknowledgement
+							nlohmann::json ready{
+								{"op", static_cast<uint8_t>(
+										   VoiceOpcode::DaveTransitionReady)},
+								{"d", {{"transition_id", transition_id}}}};
+							me->impl->m_ws->send(
+								ready.dump(),
+								[me](Result<>) mutable { me->step(); });
+							return;
 						}
 
 						case VoiceOpcode::DaveExecuteTransition: {
 							// Handle dave_protocol_execute_transition opcode
 							// (22) This is sent by Discord to instruct us to
 							// execute a prepared epoch transition
-							if (data["d"].contains("transition_id") &&
-								data["d"]["transition_id"].is_number()) {
-								uint16_t transition_id =
-									data["d"]["transition_id"].get<uint16_t>();
-								me->impl->log(
-									fmt::format(
-										"Executing DAVE transition for tid={}",
-										transition_id),
-									LogLevel::Info);
-
-								// Execute the transition now
-								me->impl->execute_dave_transition_now_async(
-									me->impl->m_dave_manager
-										->protocol_version(),
-									[me](Result<>) mutable { me->step(); });
-								return;
+							if (!data["d"].contains("transition_id") ||
+								!data["d"]["transition_id"].is_number()) {
+								break;
 							}
-							break;
+
+							uint16_t transition_id =
+								data["d"]["transition_id"].get<uint16_t>();
+
+							// Look up the protocol version from prepare phase
+							int protocol_version =
+								me->impl->m_dave_manager->protocol_version();
+							auto it = me->impl->m_dave_transition_versions.find(
+								transition_id);
+							if (it !=
+								me->impl->m_dave_transition_versions.end()) {
+								protocol_version = it->second;
+								me->impl->m_dave_transition_versions.erase(it);
+							}
+
+							me->impl->log(
+								fmt::format("Executing DAVE transition: "
+											"tid={}, version={}",
+											transition_id, protocol_version),
+								LogLevel::Info);
+
+							me->impl->execute_dave_transition_now_async(
+								protocol_version,
+								[me](Result<>) mutable { me->step(); });
+							return;
 						}
 
 						case VoiceOpcode::DavePrepareEpoch: {
 							// Handle dave_protocol_prepare_epoch opcode (24)
-							// When epoch = 1, this signals a sole member reset
-							if (data["d"].contains("epoch") &&
-								data["d"]["epoch"].is_number() &&
-								data["d"]["epoch"].get<int>() == 1) {
-								me->impl->log(
-									"Received sole member reset (epoch=1), "
-									"resetting MLS session",
-									LogLevel::Info);
-
-								// Reset the MLS session as per DAVE spec
-								me->impl->m_dave_manager->reset_session();
-
-								// Re-initialize and send a new key package
-								me->impl->maybe_start_mls_async(
-									false,	// don't force reset (we just did
-											// it)
-									[me](Result<>) mutable { me->step(); });
-								return;
+							// When epoch = 1, this signals we need to create a
+							// new MLS group for the given protocol version
+							if (!data["d"].contains("epoch") ||
+								!data["d"]["epoch"].is_number() ||
+								data["d"]["epoch"].get<int>() != 1) {
+								break;
 							}
-							break;
+
+							// Extract protocol_version for the new epoch
+							int protocol_version = 1;  // Default to 1
+							if (data["d"].contains("protocol_version") &&
+								data["d"]["protocol_version"].is_number()) {
+								protocol_version =
+									data["d"]["protocol_version"].get<int>();
+							}
+
+							me->impl->log(
+								fmt::format(
+									"Received DavePrepareEpoch: epoch=1, "
+									"version={} - creating new MLS group",
+									protocol_version),
+								LogLevel::Info);
+
+							// Set the new protocol version BEFORE reset
+							me->impl->m_dave_manager->set_protocol_version(
+								protocol_version);
+
+							// Reset the MLS session
+							me->impl->m_dave_manager->reset_session();
+
+							// Re-initialize and send a new key package
+							me->impl->maybe_start_mls_async(
+								false, [me](Result<>) mutable { me->step(); });
+							return;
 						}
 
 						default: break;

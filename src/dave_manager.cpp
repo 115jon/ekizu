@@ -90,9 +90,6 @@ Result<std::vector<std::uint8_t>> DaveManager::process_proposals(
 	boost::span<const std::byte> proposals,
 	std::set<std::string> const &recognized_users) {
 	if (!m_session) { return boost::system::errc::operation_not_permitted; }
-	if (!m_joined_via_welcome) {
-		return boost::system::errc::operation_not_permitted;
-	}
 	if (!m_mls_initialized) {
 		return boost::system::errc::operation_not_permitted;
 	}
@@ -182,7 +179,8 @@ bool DaveManager::has_key_ratchet() const noexcept {
 
 bool DaveManager::ready_to_send() const noexcept {
 	if (!is_e2ee_enabled()) { return true; }
-	if (m_encryptor.IsPassthroughMode()) { return false; }
+	// In passthrough mode, we can send without encryption
+	if (m_encryptor.IsPassthroughMode()) { return true; }
 	if (!m_encryptor.HasKeyRatchet()) { return false; }
 	return true;
 }
