@@ -11,6 +11,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ekizu {
@@ -72,6 +73,7 @@ struct DaveManager {
 									  boost::span<std::byte> ciphertext_out);
 
 	Result<std::size_t> decrypt_frame(discord::dave::MediaType media_type,
+									  const std::string &user_id,
 									  boost::span<const std::byte> ciphertext,
 									  boost::span<std::byte> plaintext_out);
 
@@ -96,7 +98,8 @@ struct DaveManager {
 	std::unique_ptr<discord::dave::mls::Session> m_session;
 
 	discord::dave::Encryptor m_encryptor;
-	discord::dave::Decryptor m_decryptor;
+	std::unordered_map<std::string, discord::dave::Decryptor> m_user_decryptors;
+	bool m_passthrough_mode = true;
 
 	std::shared_ptr<mlspp::SignaturePrivateKey> m_cached_sig_key;
 	std::function<void(std::string_view)> m_logger;

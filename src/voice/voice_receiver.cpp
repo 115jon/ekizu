@@ -154,9 +154,11 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 				auto it = impl->m_ssrc_to_user_id.find(ssrc);
 				if (it == impl->m_ssrc_to_user_id.end()) { return; }
 
+				const std::string &user_id = it->second;
+
 				std::vector<std::byte> plaintext(media_payload.size());
 				auto decrypt_res = impl->m_dave_manager->decrypt_frame(
-					discord::dave::MediaType::Audio,
+					discord::dave::MediaType::Audio, user_id,
 					boost::span<const std::byte>(
 						media_payload.data(), media_payload.size()),
 					boost::span<std::byte>(plaintext.data(), plaintext.size()));

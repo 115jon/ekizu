@@ -61,7 +61,8 @@ void DaveManager::reset_session() {
 	m_joined_via_welcome = false;
 
 	m_encryptor.SetPassthroughMode(true);
-	m_decryptor.TransitionToPassthroughMode(true);
+	m_passthrough_mode = true;
+	m_user_decryptors.clear();
 
 	if (!m_external_sender_package.empty()) {
 		if (!m_session) {
@@ -159,18 +160,23 @@ bool DaveManager::install_receiver_ratchet(const std::string &user_id) {
 	auto ratchet = m_session->GetKeyRatchet(user_id);
 	if (!ratchet) { return false; }
 
-	m_decryptor.TransitionToKeyRatchet(std::move(ratchet));
+	auto &decryptor = m_user_decryptors[user_id];
+	decryptor.TransitionToKeyRatchet(std::move(ratchet));
+	if (!m_passthrough_mode) { decryptor.TransitionToPassthroughMode(false); }
 
 	return true;
 }
 
 void DaveManager::set_passthrough_mode(bool enabled) {
 	m_encryptor.SetPassthroughMode(enabled);
-	m_decryptor.TransitionToPassthroughMode(enabled);
+	m_passthrough_mode = enabled;
+	for (auto &[uid, decryptor] : m_user_decryptors) {
+		decryptor.TransitionToPassthroughMode(enabled);
+	}
 }
 
 bool DaveManager::is_passthrough_mode() const noexcept {
-	return m_encryptor.IsPassthroughMode();
+	return m_passthrough_mode;
 }
 
 bool DaveManager::has_key_ratchet() const noexcept {
@@ -204,9 +210,14 @@ Result<std::size_t> DaveManager::encrypt_frame(
 }
 
 Result<std::size_t> DaveManager::decrypt_frame(
-	discord::dave::MediaType media_type,
+	discord::dave::MediaType media_type, const std::string &user_id,
 	boost::span<const std::byte> ciphertext,
 	boost::span<std::byte> plaintext_out) {
+	auto it = m_user_decryptors.find(user_id);
+	if (it == m_user_decryptors.end()) {
+		return boost::system::errc::no_such_file_or_directory;
+	}
+
 	auto u8_cipher = discord::dave::MakeArrayView(
 		reinterpret_cast<const uint8_t *>(ciphertext.data()),
 		ciphertext.size());
@@ -214,9 +225,7 @@ Result<std::size_t> DaveManager::decrypt_frame(
 		reinterpret_cast<uint8_t *>(plaintext_out.data()),
 		plaintext_out.size());
 
-	// Decrypt signature varies, assuming it returns size_t of written bytes or
-	// 0 on failure
-	size_t res = m_decryptor.Decrypt(media_type, u8_cipher, u8_plain);
+	size_t res = it->second.Decrypt(media_type, u8_cipher, u8_plain);
 	if (res == 0 && ciphertext.size() > 0) {
 		return boost::system::errc::io_error;
 	}
