@@ -21,7 +21,9 @@ elseif(
     OR VCPKG_TARGET_IS_FREEBSD
 )
     # GCC 15+ has false positive maybe-uninitialized warnings with std::variant
-    set(EXTRA_CXX_FLAGS "-Wno-error=maybe-uninitialized")
+    set(EXTRA_CXX_FLAGS
+        "-Wno-error=maybe-uninitialized -Wno-unknown-warning-option"
+    )
 else()
     set(EXTRA_CXX_FLAGS "")
 endif()

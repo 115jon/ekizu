@@ -72,5 +72,9 @@
         }
       ]
     }
-  }
+  },
+  "default-features": [
+    "boost",
+    "openssl"
+  ]
 }
