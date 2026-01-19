@@ -3,6 +3,7 @@
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/ssl/error.hpp>
 #include <cmath>
 #include <ekizu/json_util.hpp>
 #include <ekizu/shard.hpp>
@@ -104,7 +105,8 @@ bool is_transient_read_error(const boost::system::error_code &ec) {
 	return ec == ekizu::asio::error::operation_aborted ||
 		   ec == ekizu::asio::error::eof ||
 		   ec == ekizu::asio::error::connection_reset ||
-		   ec == ekizu::net::ws::error::closed;
+		   ec == ekizu::net::ws::error::closed ||
+		   ec == boost::asio::ssl::error::stream_truncated;
 }
 
 }  // namespace
@@ -298,18 +300,24 @@ void Shard::heartbeat_tick() {
 			if (!m_ws) { return; }
 
 			if (!m_last_heartbeat_acked) {
-				log("connection may be dead (heartbeat ack missing)",
+				++m_missed_heartbeats;
+				log(fmt::format("Missed heartbeat ACK ({}/{})",
+								m_missed_heartbeats, kMaxMissedHeartbeats),
 					LogLevel::Warn);
 
-				m_heartbeat_running = false;
+				if (m_missed_heartbeats >= kMaxMissedHeartbeats) {
+					log("Connection dead, closing for reconnect",
+						LogLevel::Error);
+					m_heartbeat_running = false;
 
-				// Best-effort: request close; ignore errors to preserve old
-				// behavior.
-				CompletionExecutor hex{m_strand};
-				close_impl(
-					CloseFrame::SESSION_EXPIRED,
-					[/*ignored*/](Result<> /*r*/) {}, std::move(hex));
-				return;
+					CompletionExecutor hex{m_strand};
+					close_impl(
+						CloseFrame::SESSION_EXPIRED,
+						[/*ignored*/](Result<> /*r*/) {}, std::move(hex));
+					return;
+				}
+			} else {
+				m_missed_heartbeats = 0;
 			}
 
 			m_last_heartbeat_acked = false;

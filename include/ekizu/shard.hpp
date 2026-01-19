@@ -235,6 +235,8 @@ struct Shard {
 	uint64_t m_reconnect_attempts{};
 	bool m_heartbeat_running{false};
 	bool m_intentional_close{false};
+	int m_missed_heartbeats{0};
+	static constexpr int kMaxMissedHeartbeats = 3;
 };
 
 }  // namespace ekizu

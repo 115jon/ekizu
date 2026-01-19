@@ -5,6 +5,13 @@
 namespace ekizu {
 
 void VoiceConnection::Impl::initiate_reconnect() {
+	// Don't reconnect if we've been intentionally disconnected
+	if (m_disconnected) {
+		log("Skipping reconnect - connection was intentionally closed",
+			LogLevel::Info);
+		return;
+	}
+
 	auto self = shared_from_this();
 
 	// Stop current heartbeat
