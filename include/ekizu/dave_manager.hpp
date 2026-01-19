@@ -64,6 +64,20 @@ struct DaveManager {
 	bool is_passthrough_mode() const noexcept;
 	bool has_key_ratchet() const noexcept;
 
+	// Transition state management
+	void set_transition_complete(bool complete) {
+		m_transition_complete = complete;
+	}
+	bool is_transition_complete() const noexcept {
+		return m_transition_complete;
+	}
+
+	void set_sender_ready(bool ready) { m_sender_ready = ready; }
+	bool is_sender_ready() const noexcept { return m_sender_ready; }
+
+	// Can attempt decrypt after sender ready, even before first success
+	bool can_attempt_decrypt() const noexcept;
+
 	bool ready_to_send() const noexcept;
 	bool ready_to_receive() const noexcept;
 
@@ -93,6 +107,8 @@ struct DaveManager {
 	bool m_mls_initialized = false;
 	bool m_joined_via_welcome = false;
 	bool m_have_external_sender = false;
+	bool m_transition_complete = false;
+	bool m_sender_ready = false;
 
 	std::vector<uint8_t> m_external_sender_package;
 	std::unique_ptr<discord::dave::mls::Session> m_session;

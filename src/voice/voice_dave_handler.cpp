@@ -246,6 +246,8 @@ void VoiceConnection::Impl::execute_dave_transition_now_async(
 			fmt::format("Executing DAVE transition to protocol version {}",
 						protocol_version),
 			LogLevel::Info);
+		self->m_dave_manager->set_transition_complete(
+			false);	 // Mark as transitioning
 		self->m_dave_manager->set_protocol_version(protocol_version);
 
 		if (protocol_version == 0) {
@@ -277,6 +279,11 @@ void VoiceConnection::Impl::execute_dave_transition_now_async(
 					"Sender ratchet successfully installed", LogLevel::Info);
 				self->m_dave_manager->set_passthrough_mode(false);
 				self->m_warned_waiting_for_e2ee = false;
+
+				// Mark sender ready - can now attempt decryption.
+				// transition_complete will be set on first successful decrypt
+				// in voice_receiver to adapt to actual network timing.
+				self->m_dave_manager->set_sender_ready(true);
 				std::move(h)(outcome::success());
 			});
 	});

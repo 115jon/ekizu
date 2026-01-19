@@ -149,12 +149,42 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 			// DAVE is ready so you only record real audio.
 			if (impl->m_dave_manager &&
 				impl->m_dave_manager->is_e2ee_enabled()) {
-				if (!impl->m_dave_manager->has_joined_via_welcome()) { return; }
+				// Wait until we can attempt decryption (sender ready)
+				if (!impl->m_dave_manager->can_attempt_decrypt()) { return; }
 
 				auto it = impl->m_ssrc_to_user_id.find(ssrc);
 				if (it == impl->m_ssrc_to_user_id.end()) { return; }
 
 				const std::string &user_id = it->second;
+
+				// Discord SFU silence packet: 3-byte sequence 0xF8FFFE
+				// Per DAVE protocol, this is synthesized when source is muted
+				// and must be allowed through without DAVE decryption.
+
+				if (media_payload.size() == 3 &&
+					std::equal(media_payload.begin(), media_payload.end(),
+							   voice::SILENCE_FRAME.begin())) {
+					Packet pkt;
+					pkt.ssrc = ssrc;
+					pkt.sequence = sequence;
+					pkt.timestamp = timestamp;
+					// Empty opus signals silence to receiver
+					pkt.user_id = nlohmann::json(user_id);
+
+					impl->m_recv_chan->async_send(
+						boost::system::error_code{}, std::move(pkt),
+						[impl = impl](boost::system::error_code ec) {
+							if (ec && !impl->m_disconnected) {
+								impl->log(fmt::format("Channel send failed: {}",
+													  ec.message()),
+										  LogLevel::Warn);
+							}
+						});
+					return;
+				}
+
+				constexpr std::size_t min_dave_frame_size = 44;
+				if (media_payload.size() < min_dave_frame_size) { return; }
 
 				std::vector<std::byte> plaintext(media_payload.size());
 				auto decrypt_res = impl->m_dave_manager->decrypt_frame(
@@ -163,17 +193,11 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 						media_payload.data(), media_payload.size()),
 					boost::span<std::byte>(plaintext.data(), plaintext.size()));
 
-				if (!decrypt_res) {
-					++dave_fail_count;
-					// Throttle: log every 200 failures to avoid flooding.
-					if ((dave_fail_count % 200) == 0) {
-						impl->log(fmt::format("DAVE decrypt still failing "
-											  "(ssrc={}, failures={}): {}",
-											  ssrc, dave_fail_count,
-											  decrypt_res.error().message()),
-								  LogLevel::Debug);
-					}
-					return;
+				if (!decrypt_res) { return; }
+
+				// First successful decrypt - mark transition complete
+				if (!impl->m_dave_manager->is_transition_complete()) {
+					impl->m_dave_manager->set_transition_complete(true);
 				}
 
 				plaintext.resize(decrypt_res.value());

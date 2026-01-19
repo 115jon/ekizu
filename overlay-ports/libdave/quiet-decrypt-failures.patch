@@ -1,0 +1,14 @@
+diff --git a/cpp/src/dave/decryptor.cpp b/cpp/src/dave/decryptor.cpp
+index 9cb4f6b..a1b2c3d 100644
+--- a/cpp/src/dave/decryptor.cpp
++++ b/cpp/src/dave/decryptor.cpp
+@@ -114,7 +114,8 @@ size_t Decryptor::Decrypt(MediaType mediaType,
+     }
+     else {
+         stats.decryptFailureCount++;
+-        DISCORD_LOG(LS_WARNING) << "Decrypt failed, no valid cryptor found, type: "
++        // Downgrade to VERBOSE: expected during epoch transitions
++        DISCORD_LOG(LS_VERBOSE) << "Decrypt failed, no valid cryptor found, type: "
+                                 << (mediaType ? "video" : "audio")
+                                 << ", encrypted frame size: " << encryptedFrame.size()
+                                 << ", plaintext frame size: " << frame.size()

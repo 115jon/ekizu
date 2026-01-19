@@ -191,6 +191,21 @@ bool DaveManager::ready_to_send() const noexcept {
 	return true;
 }
 
+bool DaveManager::can_attempt_decrypt() const noexcept {
+	if (!is_e2ee_enabled()) { return true; }
+	if (!m_joined_via_welcome) { return false; }
+	// After sender ready, we can try decrypting even if transition not complete
+	if (!m_sender_ready) { return false; }
+	return true;
+}
+
+bool DaveManager::ready_to_receive() const noexcept {
+	if (!is_e2ee_enabled()) { return true; }
+	if (!m_joined_via_welcome) { return false; }
+	if (!m_transition_complete) { return false; }
+	return true;
+}
+
 Result<std::size_t> DaveManager::encrypt_frame(
 	discord::dave::MediaType media_type, uint32_t ssrc,
 	boost::span<const std::byte> plaintext,

@@ -3,7 +3,10 @@ vcpkg_check_features(
     DISABLE_LOGGING
 )
 
-set(PATCHES "vcpkg-support.patch" "fix-arm64-overflow.patch")
+set(PATCHES "vcpkg-support.patch" "fix-arm64-overflow.patch"
+            "quiet-decrypt-failures.patch"
+)
+
 if(DISABLE_LOGGING)
     list(APPEND PATCHES "disable-logging.patch")
 endif()
