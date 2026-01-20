@@ -3,19 +3,13 @@
 
 #include <ekizu/application_command.hpp>
 #include <ekizu/http.hpp>
+#include <ekizu/interaction_callback.hpp>
+#include <ekizu/interaction_response_type.hpp>
 #include <ekizu/message.hpp>
+#include <ekizu/poll.hpp>
 #include <ekizu/request/request_sender.hpp>
 
 namespace ekizu {
-enum class InteractionResponseType : uint8_t {
-	Pong = 1,
-	ChannelMessageWithSource = 4,
-	DeferredChannelMessageWithSource = 5,
-	DeferredUpdateMessage = 6,
-	UpdateMessage = 7,
-	ApplicationCommandAutoCompleteResult = 8,
-	Modal = 9
-};
 
 struct InteractionResponseData {
 	std::optional<bool> tts;
@@ -28,6 +22,7 @@ struct InteractionResponseData {
 	std::optional<std::vector<ApplicationCommandOptionChoice>> choices;
 	std::optional<std::string> custom_id;
 	std::optional<std::string> title;
+	std::optional<Poll> poll;
 };
 
 EKIZU_EXPORT void to_json(nlohmann::json &j, const InteractionResponseData &d);
@@ -114,8 +109,40 @@ struct InteractionResponseBuilder {
 		return *this;
 	}
 
+	InteractionResponseBuilder &poll(Poll poll) {
+		if (!m_response.data) { m_response.data.emplace(); }
+		m_response.data->poll = std::move(poll);
+		return *this;
+	}
+
    private:
 	InteractionResponse m_response;
+};
+
+struct CreateResponseWithResponse {
+	EKIZU_EXPORT CreateResponseWithResponse(
+		RequestSender sender, Snowflake interaction_id,
+		std::string interaction_token, InteractionResponse response);
+
+	EKIZU_EXPORT operator net::HttpRequest() const;
+
+	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(
+		void(Result<InteractionCallbackResponse>)) CompletionToken>
+	auto send(CompletionToken &&token) const {
+		return asio::async_initiate<CompletionToken,
+									void(Result<InteractionCallbackResponse>)>(
+			[this](auto &&handler) {
+				m_sender.send<InteractionCallbackResponse>(
+					*this, std::forward<decltype(handler)>(handler));
+			},
+			token);
+	}
+
+   private:
+	Snowflake m_interaction_id;
+	std::string m_interaction_token;
+	InteractionResponse m_response;
+	RequestSender m_sender;
 };
 
 struct CreateResponse {
@@ -123,6 +150,14 @@ struct CreateResponse {
 				   std::string interaction_token, InteractionResponse response);
 
 	EKIZU_EXPORT operator net::HttpRequest() const;
+
+	/// Transforms this builder into one that returns the callback response.
+	/// This consumes the current builder.
+	[[nodiscard]] CreateResponseWithResponse with_response() && {
+		return CreateResponseWithResponse{
+			m_sender, m_interaction_id, std::move(m_interaction_token),
+			std::move(m_response)};
+	}
 
 	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
 	auto send(CompletionToken &&token) const {
@@ -133,8 +168,9 @@ struct CreateResponse {
 							   Result<net::HttpResponse> res) mutable {
 						if (!res) { return std::move(h)(res.error()); }
 
-						if (res.value().result() !=
-							net::HttpStatus::no_content) {
+						const auto &r = res.value();
+						if (r.result() != net::HttpStatus::no_content &&
+							r.result() != net::HttpStatus::ok) {
 							return std::move(h)(
 								boost::system::errc::operation_not_permitted);
 						}
@@ -151,6 +187,7 @@ struct CreateResponse {
 	InteractionResponse m_response;
 	RequestSender m_sender;
 };
+
 }  // namespace ekizu
 
 #endif	// EKIZU_REQUEST_INTERACTION_CREATE_RESPONSE_HPP

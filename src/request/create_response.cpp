@@ -15,6 +15,7 @@ void to_json(nlohmann::json &j, const InteractionResponseData &d) {
 	serialize(j, "choices", d.choices);
 	serialize(j, "custom_id", d.custom_id);
 	serialize(j, "title", d.title);
+	serialize(j, "poll", d.poll);
 }
 
 void from_json(const nlohmann::json &j, InteractionResponseData &d) {
@@ -28,6 +29,7 @@ void from_json(const nlohmann::json &j, InteractionResponseData &d) {
 	deserialize(j, "choices", d.choices);
 	deserialize(j, "custom_id", d.custom_id);
 	deserialize(j, "title", d.title);
+	deserialize(j, "poll", d.poll);
 }
 
 void to_json(nlohmann::json &j, const InteractionResponse &r) {
@@ -49,11 +51,35 @@ CreateResponse::CreateResponse(RequestSender sender, Snowflake interaction_id,
 	  m_response{std::move(response)} {}
 
 CreateResponse::operator net::HttpRequest() const {
+	std::string url = fmt::format(
+		"/interactions/{}/{}/callback", m_interaction_id, m_interaction_token);
+
 	net::HttpRequest req{
-		net::HttpMethod::post,
-		fmt::format("/interactions/{}/{}/callback", m_interaction_id,
-					m_interaction_token),
-		11,
+		net::HttpMethod::post, url, 11,
+		static_cast<nlohmann::json>(m_response)
+			.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)};
+
+	req.set(net::http::field::content_type, "application/json");
+	req.prepare_payload();
+
+	return req;
+}
+
+CreateResponseWithResponse::CreateResponseWithResponse(
+	RequestSender sender, Snowflake interaction_id,
+	std::string interaction_token, InteractionResponse response)
+	: m_sender{sender},
+	  m_interaction_id{interaction_id},
+	  m_interaction_token{std::move(interaction_token)},
+	  m_response{std::move(response)} {}
+
+CreateResponseWithResponse::operator net::HttpRequest() const {
+	std::string url =
+		fmt::format("/interactions/{}/{}/callback?with_response=true",
+					m_interaction_id, m_interaction_token);
+
+	net::HttpRequest req{
+		net::HttpMethod::post, url, 11,
 		static_cast<nlohmann::json>(m_response)
 			.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace)};
 
