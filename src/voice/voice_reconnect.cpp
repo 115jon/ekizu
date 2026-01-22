@@ -43,6 +43,14 @@ void VoiceConnection::Impl::initiate_reconnect() {
 		[self, reconnect_timer](boost::system::error_code ec) mutable {
 			if (ec) { return; }
 
+			// Re-check disconnected flag - close may have been called while
+			// waiting
+			if (self->m_disconnected) {
+				self->log("Skipping reconnect - connection closed during wait",
+						  LogLevel::Info);
+				return;
+			}
+
 			self->connect_ws_async([self](Result<> r) {
 				if (!r) {
 					self->log(fmt::format(

@@ -4,7 +4,6 @@
 #include "voice_connection_impl.hpp"
 #include "voice_util.hpp"
 
-
 namespace ekizu {
 
 void VoiceConnection::Impl::send_opus(

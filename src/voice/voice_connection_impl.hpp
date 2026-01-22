@@ -89,6 +89,7 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 
 	asio::any_io_executor get_executor() const { return m_strand; }
 
+	Result<> connect_dave(int protocol_version, std::string const &endpoint);
 	std::optional<
 		asio::experimental::channel<void(boost::system::error_code, Packet)>> &
 	recv_chan() {
@@ -165,14 +166,11 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 
 	uint64_t compute_group_id() const;
 
-	// Core state
+	// Core executor/networking
 	asio::strand<asio::any_io_executor> m_strand;
 	std::optional<net::WebSocketClient> m_ws;
-	VoiceState m_state;
-	std::string m_url;
-	std::string m_token;
 
-	// Channels
+	// Channels (depend on strand)
 	std::optional<asio::experimental::channel<void(
 		boost::system::error_code, AudioPacket)>>
 		m_channel;
@@ -183,45 +181,46 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 		asio::experimental::channel<void(boost::system::error_code, Packet)>>
 		m_recv_chan;
 
-	// Heartbeat state
+	// Timers (depend on strand)
 	std::optional<asio::steady_timer> m_heartbeat_timer;
-	uint32_t m_heartbeat_interval_ms{0};
-	bool m_last_heartbeat_acked{true};
-	bool m_heartbeat_running{false};
+	std::optional<asio::steady_timer> m_send_timer;
 
-	// Voice state
-	int64_t m_last_seq{0};
-	std::atomic<size_t> m_pending_frames{0};
-	uint32_t m_ssrc{};
+	// UDP (networking)
 	std::optional<net::UdpSocket> m_udp;
 
 	// Transport encryption
 	VoiceCrypto m_crypto;
 
-	// DAVE/MLS state
+	// DAVE/MLS state (uses networking, destroyed before ws/strand)
 	std::shared_ptr<DaveManager> m_dave_manager;
 	std::string m_media_session_id;
 	std::set<std::string> m_recognized_user_ids;
 	boost::container::flat_map<uint16_t, int> m_dave_transition_versions;
-	bool m_warned_waiting_for_e2ee{false};
 
 	// Codec
 	std::unique_ptr<Codec> m_codec;
 
-	// Connection state
+	// State (no dependencies, destroyed first)
+	VoiceState m_state;
+	std::string m_url;
+	std::string m_token;
+	uint32_t m_heartbeat_interval_ms{0};
+	bool m_last_heartbeat_acked{true};
+	bool m_heartbeat_running{false};
+	bool m_warned_waiting_for_e2ee{false};
+	int64_t m_last_seq{0};
+	std::atomic<size_t> m_pending_frames{0};
+	uint32_t m_ssrc{};
 	VoiceConnectionState m_connection_state{VoiceConnectionState::Disconnected};
 	bool m_disconnected{false};
 	bool m_speaking{false};
 	std::function<void(const Log &)> m_on_log;
 	int m_missed_heartbeats{0};
-
-	// Sender state
-	std::optional<asio::steady_timer> m_send_timer;
 	std::atomic<uint64_t> m_packet_count{0};
 	uint16_t m_rtp_sequence{0};
 	uint32_t m_rtp_timestamp{0};
 
-	// Receiver state (NEW)
+	// Receiver maps (simple containers, destroyed first)
 	std::unordered_map<uint32_t, std::string> m_ssrc_to_user_id;
 	std::unordered_map<std::string, uint32_t> m_user_id_to_ssrc;
 	bool m_receiver_running{false};

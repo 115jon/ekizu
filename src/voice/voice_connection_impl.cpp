@@ -48,6 +48,8 @@ void VoiceConnection::Impl::request_stop() {
 	}
 
 	if (m_ws) { m_ws->cancel(); }
+
+	if (m_dave_manager) { m_dave_manager->shutdown(); }
 }
 
 void VoiceConnection::Impl::close(

@@ -151,26 +151,27 @@ void Shard::close_impl(CloseFrame reason,
 	auto via = get_executor();
 	asio::dispatch(m_strand, [this, via, reason, h = std::move(h),
 							  hex = std::move(hex)]() mutable {
-		if (!m_ws) {
-			post_completion(via, std::move(hex), std::move(h),
-							Result<>{boost::system::errc::not_connected});
-			return;
+		// Always set intentional_close for normal shutdown, even if not
+		// connected. This prevents next_event_impl from attempting to
+		// reconnect.
+		if (reason.code == net::ws::close_code::normal ||
+			reason.code == net::ws::close_code::going_away) {
+			m_intentional_close = true;
+			m_resume_gateway_url.reset();
+			m_session.reset();
 		}
 
-		// Stop heartbeat first
+		// Always cancel heartbeat timer - it keeps io_context alive
 		if (m_timer) {
 			m_heartbeat_running = false;
 			m_timer->cancel();
 			m_timer.reset();
 		}
 
-		// Mark as intentional closure for normal/going_away closes
-		// This prevents next_event_impl() from attempting to reconnect
-		if (reason.code == net::ws::close_code::normal ||
-			reason.code == net::ws::close_code::going_away) {
-			m_intentional_close = true;
-			m_resume_gateway_url.reset();
-			m_session.reset();
+		if (!m_ws) {
+			post_completion(via, std::move(hex), std::move(h),
+							Result<>{boost::system::errc::not_connected});
+			return;
 		}
 
 		log(fmt::format("sending websocket close message | code={}, reason={}",
@@ -443,9 +444,11 @@ void Shard::send_resume_async(asio::any_completion_handler<void(Result<>)> h) {
 }
 
 void Shard::reconnect_async(asio::any_completion_handler<void(Result<>)> h) {
-	// Clear intentional close flag when explicitly reconnecting
-	// This allows reconnects from RECONNECT or INVALID_SESSION opcodes
-	m_intentional_close = false;
+	// If intentional close was requested, don't reconnect
+	if (m_intentional_close) {
+		std::move(h)(boost::system::errc::operation_canceled);
+		return;
+	}
 
 	auto t = std::make_shared<asio::steady_timer>(m_strand);
 
@@ -459,6 +462,13 @@ void Shard::reconnect_async(asio::any_completion_handler<void(Result<>)> h) {
 		asio::dispatch(m_strand, [this, ec, h = std::move(h)]() mutable {
 			if (ec) {
 				std::move(h)(ec);
+				return;
+			}
+
+			// Re-check intentional_close after timer fires - close may have
+			// been called while we were waiting
+			if (m_intentional_close) {
+				std::move(h)(boost::system::errc::operation_canceled);
 				return;
 			}
 

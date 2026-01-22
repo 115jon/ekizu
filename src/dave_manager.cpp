@@ -4,6 +4,10 @@ namespace ekizu {
 
 DaveManager::DaveManager(std::string user_id) : m_user_id(std::move(user_id)) {}
 
+DaveManager::~DaveManager() {
+	if (m_session) { m_session->Reset(); }
+}
+
 void DaveManager::set_logger(std::function<void(std::string_view)> logger) {
 	m_logger = std::move(logger);
 }
@@ -75,6 +79,29 @@ void DaveManager::reset_session() {
 		m_session->SetExternalSender(m_external_sender_package);
 		m_have_external_sender = true;
 	}
+}
+
+void DaveManager::shutdown() {
+	// Reset first to clear any active state
+	if (m_session) { m_session->Reset(); }
+
+	// Clear all crypto state
+	m_user_decryptors.clear();
+	m_encryptor.SetPassthroughMode(true);
+	m_passthrough_mode = true;
+
+	// Destroy MLS session completely
+	m_session.reset();
+
+	// Clear all state flags
+	m_mls_initialized = false;
+	m_joined_via_welcome = false;
+	m_have_external_sender = false;
+	m_transition_complete = false;
+	m_sender_ready = false;
+	m_external_sender_package.clear();
+	m_cached_sig_key.reset();
+	m_logger = nullptr;
 }
 
 Result<std::vector<std::byte>> DaveManager::get_marshalled_key_package() {

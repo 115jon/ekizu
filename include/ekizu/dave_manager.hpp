@@ -18,6 +18,7 @@ namespace ekizu {
 // Manages all DAVE/MLS encryption state and operations
 struct DaveManager {
 	explicit DaveManager(std::string user_id);
+	~DaveManager();
 
 	void set_logger(std::function<void(std::string_view)> logger);
 
@@ -31,6 +32,8 @@ struct DaveManager {
 		int protocol_version, uint64_t group_id,
 		std::shared_ptr<mlspp::SignaturePrivateKey> sig_key);
 	void reset_session();
+	/// Fully destroys MLS session for clean shutdown
+	void shutdown();
 
 	bool is_initialized() const noexcept { return m_mls_initialized; }
 	bool has_joined_via_welcome() const noexcept {
@@ -109,16 +112,16 @@ struct DaveManager {
 	bool m_have_external_sender = false;
 	bool m_transition_complete = false;
 	bool m_sender_ready = false;
+	bool m_passthrough_mode = true;
 
 	std::vector<uint8_t> m_external_sender_package;
-	std::unique_ptr<discord::dave::mls::Session> m_session;
+	std::shared_ptr<mlspp::SignaturePrivateKey> m_cached_sig_key;
+	std::function<void(std::string_view)> m_logger;
 
 	discord::dave::Encryptor m_encryptor;
 	std::unordered_map<std::string, discord::dave::Decryptor> m_user_decryptors;
-	bool m_passthrough_mode = true;
 
-	std::shared_ptr<mlspp::SignaturePrivateKey> m_cached_sig_key;
-	std::function<void(std::string_view)> m_logger;
+	std::unique_ptr<discord::dave::mls::Session> m_session;
 };
 }  // namespace ekizu
 
