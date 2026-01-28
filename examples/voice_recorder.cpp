@@ -52,6 +52,7 @@ Result<> save_packet(const Packet &pkt) {
 	recording_file.write(reinterpret_cast<const char *>(&size_be), 4);
 	recording_file.write(reinterpret_cast<const char *>(pkt.opus.data()),
 						 static_cast<std::streamsize>(pkt.opus.size()));
+	recording_file.flush();	 // Ensure complete records are written atomically
 
 	packets_by_ssrc[pkt.ssrc]++;
 	packets_by_user[pkt.user_id]++;
@@ -66,15 +67,12 @@ Result<> save_packet(const Packet &pkt) {
 
 Result<> start_recording(VoiceConnection conn, const asio::yield_context &yield,
 						 Shard &shard, Snowflake guild_id) {
-	conn.attach_logger([](const ekizu::Log &log) {
-		fmt::println("{}", log.message);
-	});
-
 	EKIZU_TRY(conn.run(yield));
 
 	fmt::println("Recording started; speak in the voice channel...");
 	fmt::println("Recording for 30 seconds (or until you leave)");
 
+	size_t total_bytes{};
 	for (int i = 0; i < 1500; ++i) {
 		boost::system::error_code ec;
 		auto pkt = conn.receive_packet(yield[ec]);
@@ -84,13 +82,17 @@ Result<> start_recording(VoiceConnection conn, const asio::yield_context &yield,
 			break;
 		}
 
+		if (!pkt.opus.empty()) { total_bytes += pkt.opus.size(); }
 		EKIZU_TRY(save_packet(pkt));
 	}
 
+	recording_file.flush();
 	recording_file.close();
 
 	fmt::println("\nRecording complete!");
 	fmt::println("Total packets: {}", total_packets);
+	fmt::println(
+		"AUDIO_STATS: samples={}, total_bytes={}", total_packets, total_bytes);
 	fmt::println("Unique speakers: {}", packets_by_ssrc.size());
 	for (const auto &[ssrc, count] : packets_by_ssrc) {
 		fmt::println(" - SSRC {}: {} packets", ssrc, count);
@@ -111,6 +113,7 @@ async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
 	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
+	ekizu::init_logger();
 
 	fmt::println("Voice Recorder Bot Starting...\n");
 
@@ -163,6 +166,40 @@ Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 			} else if constexpr (std::is_same_v<T, Ready>) {
 				fmt::println("{} is ready!", event.user.username);
 				fmt::println("Use: >record in a text channel\n");
+
+				// Auto-record logic
+				const char *env_guild = std::getenv("TEST_GUILD_ID");
+				const char *env_channel = std::getenv("TEST_CHANNEL_ID");
+
+				if (env_guild && env_channel) {
+					Snowflake guild_id(std::stoull(env_guild));
+					Snowflake channel_id(std::stoull(env_channel));
+
+					fmt::println("Auto-recording in Guild {} Channel {}...",
+								 guild_id, channel_id);
+					EKIZU_TRY(
+						shard.join_voice_channel(guild_id, channel_id, yield));
+
+					const auto *config = channel->async_receive(yield);
+					asio::spawn(
+						yield,
+						[config, &shard, guild_id](auto y) {
+							auto conn_res =
+								config->connect(y.get_executor(), y);
+							if (!conn_res) {
+								fmt::println(stderr, "Voice connect failed: {}",
+											 conn_res.error().message());
+								return;
+							}
+							auto r =
+								start_recording(std::move(conn_res.value()), y,
+												shard, guild_id);
+							if (!r)
+								fmt::println(stderr, "Recording failed: {}",
+											 r.error().message());
+						},
+						asio::detached);
+				}
 
 				EKIZU_TRY(shard.update_presence(
 					{{},

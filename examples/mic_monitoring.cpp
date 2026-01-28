@@ -64,10 +64,6 @@ async_main(const asio::yield_context &yield) {
 	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
-	shard.attach_logger([](const Log &log) {
-		fmt::println("{}", log.message);
-	});
-
 	while (true) {
 		auto res = shard.next_event(yield);
 
@@ -184,8 +180,6 @@ Result<> start_voice_connection(const VoiceConnectionConfig &voice_conn_config,
 	// Uses the config to create a voice connection.
 	EKIZU_TRY(
 		auto conn, voice_conn_config.connect(yield.get_executor(), yield));
-
-	conn.attach_logger([](auto log) { fmt::println("{}", log.message); });
 
 	// Starts the connection's run loop. Does not block.
 	EKIZU_TRY(conn.run(yield));

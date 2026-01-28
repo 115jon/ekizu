@@ -10,13 +10,8 @@
       "default-features": false
     },
     "fmt",
-    {
-      "name": "libdave",
-      "features": [
-        "disable-logging"
-      ]
-    },
     "libsodium",
+    "mlspp",
     "nlohmann-json",
     "opus",
     "portaudio",
@@ -30,6 +25,7 @@
         "boost-asio",
         "boost-beast",
         "boost-charconv",
+        "boost-container",
         "boost-coroutine",
         "boost-filesystem",
         "boost-outcome",

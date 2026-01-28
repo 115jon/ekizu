@@ -52,10 +52,6 @@ VoiceConnection::recv_chan() {
 	return m_impl->recv_chan();
 }
 
-void VoiceConnection::attach_logger(std::function<void(const Log &)> on_log) {
-	m_impl->attach_logger(std::move(on_log));
-}
-
 void VoiceConnection::request_stop() { m_impl->request_stop(); }
 
 asio::any_io_executor VoiceConnection::get_executor() const {

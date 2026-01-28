@@ -130,19 +130,8 @@ Shard::Shard(asio::any_io_executor executor, ShardId id, std::string_view token,
 			 Intents intents)
 	: m_strand{executor},
 	  m_id{id.id},
-	  m_config{std::string{token}, intents, id.total} {}
-
-void Shard::attach_logger(std::function<void(Log)> on_log) {
-	m_on_log = std::move(on_log);
-}
-
-void Shard::log(std::string_view msg, LogLevel level) const {
-	if (!m_on_log) { return; }
-	m_on_log(Log{
-		level,
-		fmt::format(
-			"shard{{id=[{}, {}]}}: {}", m_id, m_config.shard_count, msg),
-	});
+	  m_config{std::string{token}, intents, id.total} {
+	m_logger.prefix = fmt::format("shard[{}, {}]", m_id, m_config.shard_count);
 }
 
 void Shard::close_impl(CloseFrame reason,
@@ -174,8 +163,8 @@ void Shard::close_impl(CloseFrame reason,
 			return;
 		}
 
-		log(fmt::format("sending websocket close message | code={}, reason={}",
-						reason.code, reason.reason.data()));
+		m_logger.debug("sending websocket close message | code={}, reason={}",
+					   reason.code, reason.reason.data());
 
 		net::ws::close_reason cr{
 			static_cast<net::ws::close_code>(reason.code),
@@ -211,9 +200,9 @@ void Shard::join_voice_channel_impl(
 				 {"self_deaf", false},
 			 }},
 		};
-		log(fmt::format(
+		m_logger.debug(
 			"joining voice channel | guild_id={}, channel_id={}, raw={}",
-			guild_id, channel_id, payload.dump()));
+			guild_id, channel_id, payload.dump());
 
 		m_ws->send(payload.dump(), [this, via, h = std::move(h),
 									hex = std::move(hex)](Result<> r) mutable {
@@ -244,8 +233,8 @@ void Shard::leave_voice_channel_impl(
 				 {"self_deaf", false},
 			 }},
 		};
-		log(fmt::format("leaving voice channel | guild_id={}, raw={}", guild_id,
-						payload.dump()));
+		m_logger.debug("leaving voice channel | guild_id={}, raw={}", guild_id,
+					   payload.dump());
 
 		m_ws->send(payload.dump(), [this, via, h = std::move(h),
 									hex = std::move(hex)](Result<> r) mutable {
@@ -271,7 +260,7 @@ void Shard::update_presence_impl(UpdatePresence presence,
 			{"op", static_cast<uint8_t>(GatewayOpcode::PresenceUpdate)},
 			{"d", presence},
 		};
-		log(fmt::format("updating presence | raw={}", payload.dump()));
+		m_logger.debug("updating presence | raw={}", payload.dump());
 
 		m_ws->send(payload.dump(), [this, via, h = std::move(h),
 									hex = std::move(hex)](Result<> r) mutable {
@@ -287,7 +276,7 @@ void Shard::start_heartbeat(uint32_t heartbeat_interval) {
 	if (!m_timer) { m_timer.emplace(m_strand); }
 
 	m_heartbeat_running = true;
-	log("started heartbeat timer");
+	m_logger.debug("started heartbeat timer");
 	heartbeat_tick();
 }
 
@@ -302,13 +291,11 @@ void Shard::heartbeat_tick() {
 
 			if (!m_last_heartbeat_acked) {
 				++m_missed_heartbeats;
-				log(fmt::format("Missed heartbeat ACK ({}/{})",
-								m_missed_heartbeats, kMaxMissedHeartbeats),
-					LogLevel::Warn);
+				m_logger.warn("Missed heartbeat ACK ({}/{})",
+							  m_missed_heartbeats, kMaxMissedHeartbeats);
 
 				if (m_missed_heartbeats >= kMaxMissedHeartbeats) {
-					log("Connection dead, closing for reconnect",
-						LogLevel::Error);
+					m_logger.error("Connection dead, closing for reconnect");
 					m_heartbeat_running = false;
 
 					CompletionExecutor hex{m_strand};
@@ -344,9 +331,8 @@ void Shard::send_heartbeat_async(
 		{"d", d},
 	};
 
-	log(fmt::format(
-		"sending heartbeat | sequence={}",
-		m_session ? boost::to_string(m_session->sequence) : "null"));
+	m_logger.debug("sending heartbeat | sequence={}",
+				   m_session ? boost::to_string(m_session->sequence) : "null");
 
 	m_ws->send(payload.dump(), std::move(h));
 }
@@ -437,8 +423,8 @@ void Shard::send_resume_async(asio::any_completion_handler<void(Result<>)> h) {
 		 }},
 	};
 
-	log(fmt::format("sending resume | session_id={}, sequence={}",
-					m_session->id, m_session->sequence));
+	m_logger.info("sending resume | session_id={}, sequence={}", m_session->id,
+				  m_session->sequence);
 
 	m_ws->send(payload.dump(), std::move(h));
 }
@@ -476,8 +462,8 @@ void Shard::reconnect_async(asio::any_completion_handler<void(Result<>)> h) {
 						   ? fmt::format("{}/{}", *m_resume_gateway_url,
 										 GATEWAY_JSON_ZLIB_QUERY)
 						   : GATEWAY_URL;
-			log(fmt::format(
-				"{}connecting to {}", m_resume_gateway_url ? "re" : "", url));
+			m_logger.debug(
+				"{}connecting to {}", m_resume_gateway_url ? "re" : "", url);
 
 			net::WebSocketClient::connect(
 				m_strand.get_inner_executor(), url,
@@ -486,17 +472,15 @@ void Shard::reconnect_async(asio::any_completion_handler<void(Result<>)> h) {
 					asio::dispatch(m_strand, [this, ws_res = std::move(ws_res),
 											  h = std::move(h)]() mutable {
 						if (!ws_res) {
-							log(fmt::format(
-									"failed to connect to {} | error={} | "
-									"reconnect_attempts={}",
-									m_resume_gateway_url
-										? fmt::format(
-											  "{}/{}", *m_resume_gateway_url,
-											  GATEWAY_JSON_ZLIB_QUERY)
-										: std::string(GATEWAY_URL),
-									ws_res.error().message(),
-									m_reconnect_attempts),
-								LogLevel::Error);
+							m_logger.error(
+								"failed to connect to {} | error={} | "
+								"reconnect_attempts={}",
+								m_resume_gateway_url
+									? fmt::format(
+										  "{}/{}", *m_resume_gateway_url,
+										  GATEWAY_JSON_ZLIB_QUERY)
+									: std::string(GATEWAY_URL),
+								ws_res.error().message(), m_reconnect_attempts);
 							++m_reconnect_attempts;
 							m_resume_gateway_url.reset();
 							std::move(h)(ws_res.error());
@@ -553,9 +537,8 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 				if (!self->m_ws || !self->m_ws->is_open()) {
 					// Don't reconnect if we intentionally closed.
 					if (self->m_intentional_close) {
-						self->log(
-							"connection closed intentionally, "
-							"not "
+						self->m_logger.debug(
+							"connection closed intentionally, not "
 							"reconnecting");
 						complete(boost::system::errc::not_connected);
 						return;
@@ -599,24 +582,34 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 
 			void on_read_error(const boost::system::error_code &ec) {
 				// Strand-only.
+				// Strand-only.
 				if (self->m_ws && self->m_ws->close_reason()) {
-					self->log(
-						fmt::format("read error | ec={}, msg={}, "
-									"close_reason={{code={}, reason={}}}",
-									ec.value(), ec.message(),
-									self->m_ws->close_reason()->code,
-									self->m_ws->close_reason()->reason.data()),
-						LogLevel::Error);
+					if (self->m_ws->close_reason()->code ==
+						net::ws::close_code::normal) {
+						// Filter out normal close logs to debug
+						self->m_logger.debug(
+							"read error (expected) | ec={}, msg={}, "
+							"close_reason={{code={}, reason={}}}",
+							ec.value(), ec.message(),
+							self->m_ws->close_reason()->code,
+							self->m_ws->close_reason()->reason.data());
+					} else {
+						self->m_logger.error(
+							"read error | ec={}, msg={}, "
+							"close_reason={{code={}, reason={}}}",
+							ec.value(), ec.message(),
+							self->m_ws->close_reason()->code,
+							self->m_ws->close_reason()->reason.data());
+					}
 
 				} else {
-					self->log(fmt::format("read error | ec={}, msg={}",
-										  ec.value(), ec.message()),
-							  LogLevel::Error);
+					self->m_logger.error(
+						"read error | ec={}, msg={}", ec.value(), ec.message());
 				}
 
 				// If we intentionally closed, don't attempt to reconnect.
 				if (self->m_intentional_close) {
-					self->log(
+					self->m_logger.info(
 						"connection error after intentional close, "
 						"not "
 						"reconnecting");
@@ -674,11 +667,11 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 						const std::string event_type = json["t"];
 						const auto &event = json["d"];
 
-						self->log(fmt::format(
+						self->m_logger.debug(
 							"received dispatch {{t: {}, s: {}, d: {}}}",
 							event_type,
 							sequence ? boost::to_string(*sequence) : "null",
-							event.dump()));
+							event.dump());
 
 						if (event_type == "READY") {
 							if (!event.contains("resume_gateway_"
@@ -699,11 +692,11 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 							self->m_resume_gateway_url =
 								event["resume_gateway_url"].get<std::string>();
 
-							self->log(fmt::format(
+							self->m_logger.info(
 								"received ready | resume_gateway_url={}, "
 								"session_id={}",
 								*self->m_resume_gateway_url,
-								self->m_session->id));
+								self->m_session->id);
 						}
 
 						if (self->m_session && sequence) {
@@ -734,7 +727,7 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 					}
 
 					case GatewayOpcode::Reconnect: {
-						self->log("received reconnect");
+						self->m_logger.info("received reconnect");
 						self->close_impl(
 							CloseFrame::RESUME,
 							[me =
@@ -760,9 +753,9 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 						}
 
 						const bool resumable = json["d"];
-						self->log(fmt::format(
+						self->m_logger.info(
 							"received invalid session | resumable={}",
-							resumable));
+							resumable);
 
 						self->close_impl(
 							resumable ? CloseFrame::RESUME : CloseFrame::NORMAL,
@@ -800,9 +793,9 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 
 						const uint32_t heartbeat_interval =
 							hello["heartbeat_interval"];
-						self->log(fmt::format(
+						self->m_logger.info(
 							"received hello | heartbeat_interval={}",
-							heartbeat_interval));
+							heartbeat_interval);
 
 						self->start_heartbeat(heartbeat_interval);
 
@@ -829,7 +822,7 @@ void Shard::next_event_impl(asio::any_completion_handler<void(Result<Event>)> h,
 
 					case GatewayOpcode::HeartbeatAck: {
 						self->m_last_heartbeat_acked = true;
-						self->log("received heartbeat ack");
+						self->m_logger.debug("received heartbeat ack");
 						complete(boost::system::error_code{});
 						return;
 					}

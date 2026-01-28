@@ -13,12 +13,17 @@ namespace ekizu {
  * resources.
  */
 struct Snowflake {
+	Snowflake() = default;
+	Snowflake(uint64_t id) : id(id) {}
+
 	bool operator==(Snowflake other) const { return id == other.id; }
 	bool operator!=(Snowflake other) const { return id != other.id; }
 	bool operator<(Snowflake other) const { return id < other.id; }
 	bool operator<=(Snowflake other) const { return id <= other.id; }
 	bool operator>(Snowflake other) const { return id > other.id; }
 	bool operator>=(Snowflake other) const { return id >= other.id; }
+
+	uint64_t operator()(Snowflake s) const { return s.id; }
 
 	/**
 	 * @brief Returns the timestamp of the Snowflake.

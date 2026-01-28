@@ -1,34 +1,27 @@
-#include <sodium/crypto_generichash.h>
-
 #include <boost/charconv/from_chars.hpp>
 #include <ekizu/json_util.hpp>
 #include <ekizu/voice_connection.hpp>
 
+#include "../dave/displayable_code.hpp"
 #include "voice_connection_impl.hpp"
 #include "voice_util.hpp"
 
 namespace ekizu {
 
-static Result<std::uint64_t> parse_media_session_id_prefix_hex16(
-	std::string_view s) {
-	if (s.size() < 16) {
-		return make_error_code(boost::system::errc::invalid_argument);
+namespace {
+
+std::set<uint64_t> convert_to_numeric_ids(
+	const std::set<std::string> &string_ids) {
+	std::set<uint64_t> result;
+	for (const auto &id : string_ids) {
+		try {
+			result.insert(std::stoull(id));
+		} catch (...) {}
 	}
-
-	std::uint64_t v = 0;
-	const char *first = s.data();
-	const char *last = first + 16;
-
-	auto r = boost::charconv::from_chars(first, last, v, 16);
-
-	if (r.ec == std::errc{} && r.ptr == last) { return v; }
-
-	if (r.ec == std::errc::result_out_of_range) {
-		return make_error_code(boost::system::errc::result_out_of_range);
-	}
-
-	return make_error_code(boost::system::errc::invalid_argument);
+	return result;
 }
+
+}  // namespace
 
 void VoiceConnection::Impl::handle_binary_event_async(
 	VoiceOpcode op, std::vector<std::byte> payload, uint16_t /*seq*/,
@@ -39,69 +32,58 @@ void VoiceConnection::Impl::handle_binary_event_async(
 		auto payload_span =
 			boost::span<const std::byte>(payload.data(), payload.size());
 
+		if (!self->m_dave || !self->m_dave->session) {
+			std::move(h)(outcome::success());
+			return;
+		}
+
 		switch (op) {
 			case VoiceOpcode::DaveMlsExternalSender: {
-				self->m_dave_manager->set_external_sender(
-					{payload.begin(), payload.end()});
+				self->m_logger.info("Received dave_mls_external_sender");
+				std::vector<uint8_t> sender_data(
+					reinterpret_cast<const uint8_t *>(payload.data()),
+					reinterpret_cast<const uint8_t *>(payload.data()) +
+						payload.size());
+				self->m_dave->session->set_external_sender(sender_data);
 				self->maybe_start_mls_async(false, std::move(h));
 				return;
 			}
 
 			case VoiceOpcode::DaveMlsProposals: {
-				self->log("Received dave_mls_proposals", LogLevel::Info);
+				self->m_logger.info("Received dave_mls_proposals");
 
-				auto process = [self](
-								   std::vector<std::byte> &payload,
-								   asio::any_completion_handler<void(Result<>)>
-									   &h) mutable {
-					auto recognized = self->m_recognized_user_ids;
-					recognized.insert(fmt::to_string(self->m_state.user_id));
+				auto recognized =
+					convert_to_numeric_ids(self->m_recognized_user_ids);
+				recognized.insert(self->m_state.user_id.id);
 
-					auto res = self->m_dave_manager->process_proposals(
-						payload, recognized);
-					if (!res) {
-						self->log(
-							"process_proposals failed; resetting MLS session",
-							LogLevel::Warn);
+				std::vector<uint8_t> proposals_data(
+					reinterpret_cast<const uint8_t *>(payload.data()),
+					reinterpret_cast<const uint8_t *>(payload.data()) +
+						payload.size());
+				auto res = self->m_dave->session->process_proposals(
+					proposals_data, recognized);
 
-						self->maybe_start_mls_async(
-							true, [self, h = std::move(h)](Result<> r) mutable {
-								if (!r) {
-									std::move(h)(r.error());
-									return;
-								}
-								std::move(h)(outcome::success());
-							});
-						return;
-					}
+				self->m_logger.info("process_proposals result: {}",
+									res.has_value() ? "success" : "failure");
 
-					const auto &cw = res.value();
-					std::vector<std::byte> cw_vec(
-						reinterpret_cast<const std::byte *>(cw.data()),
-						reinterpret_cast<const std::byte *>(cw.data()) +
-							cw.size());
-					self->send_mls_commit_welcome(
-						std::move(cw_vec), std::move(h));
-				};
-
-				if (!self->m_dave_manager->is_initialized()) {
-					// If MLS start fails, propagate the error (don’t “clear”
-					// the lambda).
-					self->maybe_start_mls_async(
-						false, [self, payload = std::move(payload),
-								h = std::move(h), process](Result<> r) mutable {
-							if (!r) {
-								std::move(h)(r.error());
-								return;
-							}
-							auto p = payload;
-							auto hh = std::move(h);
-							process(p, hh);
-						});
+				if (!res) {
+					self->m_logger.warn(
+						"process_proposals failed; ignoring proposal");
+					std::move(h)(outcome::success());
 					return;
 				}
 
-				process(payload, h);
+				const auto &commit_msg = res.value();
+				std::vector<std::byte> commit_vec(
+					reinterpret_cast<const std::byte *>(commit_msg.data()),
+					reinterpret_cast<const std::byte *>(commit_msg.data()) +
+						commit_msg.size());
+
+				self->m_logger.info(
+					"Sending mls_commit_message (size={})", commit_vec.size());
+
+				self->send_mls_commit_welcome(
+					std::move(commit_vec), std::move(h));
 				return;
 			}
 
@@ -114,17 +96,43 @@ void VoiceConnection::Impl::handle_binary_event_async(
 				uint16_t tid = voice::read_u16be(payload_span);
 				auto commit_data = payload_span.subspan(2);
 
-				if (self->m_dave_manager->process_commit(commit_data)) {
+				std::vector<uint8_t> commit_vec(
+					reinterpret_cast<const uint8_t *>(commit_data.data()),
+					reinterpret_cast<const uint8_t *>(commit_data.data()) +
+						commit_data.size());
+
+				auto result = self->m_dave->session->process_commit(commit_vec);
+
+				if (std::holds_alternative<dave::RosterMap>(result)) {
+					auto &roster = std::get<dave::RosterMap>(result);
+					self->m_dave->cached_roster_map = roster;
+
 					nlohmann::json ready{
 						{"op", static_cast<uint8_t>(
 								   VoiceOpcode::DaveTransitionReady)},
 						{"d", {{"transition_id", tid}}}};
+
+					if (tid == 0) {
+						self->send_voice_json(
+							ready,
+							[self, h = std::move(h)](Result<> r) mutable {
+								if (!r) {
+									std::move(h)(r.error());
+									return;
+								}
+								self->execute_dave_transition_now_async(
+									static_cast<int>(
+										self->m_dave->protocol_version),
+									std::move(h));
+							});
+						return;
+					}
+
 					self->send_voice_json(ready, std::move(h));
 					return;
 				}
 
-				self->log(fmt::format("Failed to process commit (tid={})", tid),
-						  LogLevel::Warn);
+				self->m_logger.warn("Failed to process commit (tid={})", tid);
 				self->recover_mls_after_invalid_transition_async(
 					tid, std::move(h));
 				return;
@@ -137,56 +145,66 @@ void VoiceConnection::Impl::handle_binary_event_async(
 				}
 
 				uint16_t tid = voice::read_u16be(payload_span);
-				auto recognized = self->m_recognized_user_ids;
-				recognized.insert(fmt::to_string(self->m_state.user_id));
+				auto recognized =
+					convert_to_numeric_ids(self->m_recognized_user_ids);
+				recognized.insert(self->m_state.user_id.id);
 
-				if (!self->m_dave_manager->process_welcome(
-						payload_span.subspan(2), recognized)) {
+				std::vector<uint8_t> welcome_data(
+					reinterpret_cast<const uint8_t *>(payload_span.data() + 2),
+					reinterpret_cast<const uint8_t *>(payload_span.data()) +
+						payload_span.size());
+
+				auto welcome_result = self->m_dave->session->process_welcome(
+					welcome_data, recognized);
+
+				if (!welcome_result) {
 					self->recover_mls_after_invalid_transition_async(
 						tid, std::move(h));
 					return;
 				}
 
-				self->log(
-					"Welcome processed successfully - installing receiver "
-					"ratchets",
-					LogLevel::Info);
+				self->m_logger.info(
+					"Welcome processed - installing receiver ratchets");
 
-				int installed = 0;
-				int failed = 0;
-				for (const auto &user_id : recognized) {
-					// Don't install receiver ratchet for yourself
-					if (user_id == fmt::to_string(self->m_state.user_id)) {
-						continue;
-					}
+				// Install decryptors for all users in the roster
+				int installed{};
+				for (const auto &[user_id, _] : *welcome_result) {
+					if (user_id == self->m_state.user_id.id) { continue; }
 
-					if (self->m_dave_manager->install_receiver_ratchet(
-							user_id)) {
+					auto ratchet =
+						self->m_dave->session->get_key_ratchet(user_id);
+					if (ratchet) {
+						auto decryptor = std::make_unique<dave::Decryptor>();
+						decryptor->transition_to_key_ratchet(
+							std::move(ratchet));
+						self->m_dave->decryptors[std::to_string(user_id)] =
+							std::move(decryptor);
 						installed++;
-						self->log(fmt::format(
-									  "Installed receiver ratchet for user {}",
-									  user_id),
-								  LogLevel::Info);
-					} else {
-						failed++;
-						self->log(fmt::format("âŒ Failed to install receiver "
-											  "ratchet for user {}",
-											  user_id),
-								  LogLevel::Warn);
 					}
 				}
 
-				self->log(
-					fmt::format("Receiver ratchets installed: {}, failed: {}",
-								installed, failed),
-					LogLevel::Info);
+				self->m_logger.info(
+					"Installed {} receiver decryptors", installed);
 
 				nlohmann::json ready{
 					{"op",
 					 static_cast<uint8_t>(VoiceOpcode::DaveTransitionReady)},
 					{"d", {{"transition_id", tid}}}};
 
-				// Send ready and wait for Discord to send DaveExecuteTransition
+				if (tid == 0) {
+					self->send_voice_json(ready, [self, h = std::move(h)](
+													 Result<> r) mutable {
+						if (!r) {
+							std::move(h)(r.error());
+							return;
+						}
+						self->execute_dave_transition_now_async(
+							static_cast<int>(self->m_dave->protocol_version),
+							std::move(h));
+					});
+					return;
+				}
+
 				self->send_voice_json(ready, std::move(h));
 				return;
 			}
@@ -202,36 +220,37 @@ void VoiceConnection::Impl::maybe_start_mls_async(
 	bool force_reset, asio::any_completion_handler<void(Result<>)> h) {
 	auto self = shared_from_this();
 	asio::dispatch(m_strand, [self, force_reset, h = std::move(h)]() mutable {
-		if (self->m_dave_manager->protocol_version() <= 0) {
+		if (!self->m_dave || self->m_dave->protocol_version <= 0) {
 			std::move(h)(outcome::success());
 			return;
 		}
 
-		if (force_reset) { self->m_dave_manager->reset_session(); }
-		if (self->m_dave_manager->is_initialized() && !force_reset) {
+		if (force_reset && self->m_dave->session) {
+			self->m_dave->session->reset();
+		}
+
+		if (self->m_dave->session && self->m_dave->session->is_initialized() &&
+			!force_reset) {
 			std::move(h)(outcome::success());
 			return;
 		}
 
-		if (!self->m_dave_manager->has_external_sender()) {
+		if (!self->m_dave->session ||
+			!self->m_dave->session->has_external_sender()) {
 			std::move(h)(outcome::success());
 			return;
 		}
 
-		auto sig = self->m_dave_manager->get_or_create_sig_key(
-			self->m_dave_manager->protocol_version());
-		if (!sig) {
-			std::move(h)(outcome::success());
-			return;
-		}
+		// Initialize session
+		self->m_dave->session->init(
+			self->m_dave->protocol_version, self->compute_group_id(),
+			self->m_state.user_id.id, self->m_dave->transient_key);
 
-		auto init_res = self->m_dave_manager->initialize_session(
-			self->m_dave_manager->protocol_version(), self->compute_group_id(),
-			sig);
-		if (!init_res) {
-			std::move(h)(init_res.error());
-			return;
-		}
+		// Reset encryptor logic to ensure fresh state/nonces
+		self->m_dave->encryptor = std::make_unique<dave::Encryptor>();
+		self->m_dave->encryptor->assign_ssrc_to_codec(
+			self->m_ssrc, dave::Codec::Opus);
+		self->m_dave->encryptor->set_passthrough_mode(true);
 
 		self->send_mls_key_package(std::move(h));
 	});
@@ -242,50 +261,62 @@ void VoiceConnection::Impl::execute_dave_transition_now_async(
 	auto self = shared_from_this();
 	asio::dispatch(m_strand, [self, protocol_version,
 							  h = std::move(h)]() mutable {
-		self->log(
-			fmt::format("Executing DAVE transition to protocol version {}",
-						protocol_version),
-			LogLevel::Info);
-		self->m_dave_manager->set_transition_complete(
-			false);	 // Mark as transitioning
-		self->m_dave_manager->set_protocol_version(protocol_version);
+		self->m_logger.info("Executing DAVE transition to protocol version {}",
+							protocol_version);
 
-		if (protocol_version == 0) {
-			self->log("Transitioning to protocol version 0 (passthrough mode)",
-					  LogLevel::Info);
-			self->m_dave_manager->reset_session();
+		if (!self->m_dave) {
 			std::move(h)(outcome::success());
 			return;
 		}
 
-		self->maybe_start_mls_async(
-			false, [self, h = std::move(h)](Result<> r) mutable {
-				if (!r) {
-					std::move(h)(r.error());
-					return;
-				}
+		self->m_dave->done_ready = false;
+		self->m_dave->protocol_version =
+			static_cast<dave::ProtocolVersion>(protocol_version);
+		if (self->m_dave->session) {
+			self->m_dave->session->set_protocol_version(
+				static_cast<dave::ProtocolVersion>(protocol_version));
+		}
 
-				if (!self->m_dave_manager->install_sender_ratchet()) {
-					self->log(
-						"CRITICAL: Sender ratchet installation FAILED - "
-						"forcing passthrough",
-						LogLevel::Error);
-					self->m_dave_manager->set_passthrough_mode(true);
-					std::move(h)(boost::system::errc::operation_not_permitted);
-					return;
-				}
+		if (protocol_version == 0) {
+			self->m_logger.info(
+				"Transitioning to protocol version 0 (passthrough mode)");
+			if (self->m_dave->session) { self->m_dave->session->reset(); }
+			if (self->m_dave->encryptor) {
+				self->m_dave->encryptor->set_passthrough_mode(true);
+			}
+			std::move(h)(outcome::success());
+			return;
+		}
 
-				self->log(
-					"Sender ratchet successfully installed", LogLevel::Info);
-				self->m_dave_manager->set_passthrough_mode(false);
-				self->m_warned_waiting_for_e2ee = false;
+		self->maybe_start_mls_async(false, [self, h = std::move(h)](
+											   Result<> r) mutable {
+			if (!r) {
+				std::move(h)(r.error());
+				return;
+			}
 
-				// Mark sender ready - can now attempt decryption.
-				// transition_complete will be set on first successful decrypt
-				// in voice_receiver to adapt to actual network timing.
-				self->m_dave_manager->set_sender_ready(true);
-				std::move(h)(outcome::success());
-			});
+			// Validate state
+			if (!self->m_dave || !self->m_dave->session ||
+				!self->m_dave->encryptor) {
+				std::move(h)(boost::system::errc::operation_not_permitted);
+				return;
+			}
+
+			self->update_ratchets();
+
+			if (!self->m_dave->encryptor->has_key_ratchet()) {
+				self->m_logger.error("CRITICAL: Failed to get sender ratchet");
+				self->m_dave->encryptor->set_passthrough_mode(true);
+				std::move(h)(boost::system::errc::operation_not_permitted);
+				return;
+			}
+
+			self->m_dave->encryptor->set_passthrough_mode(false);
+			self->m_warned_waiting_for_e2ee = false;
+
+			self->m_logger.info("Sender ratchet successfully installed");
+			std::move(h)(outcome::success());
+		});
 	});
 }
 
@@ -298,31 +329,60 @@ void VoiceConnection::Impl::recover_mls_after_invalid_transition_async(
 				std::move(h)(r.error());
 				return;
 			}
-			self->m_dave_manager->reset_session();
+			if (self->m_dave && self->m_dave->session) {
+				self->m_dave->session->reset();
+			}
 			self->maybe_start_mls_async(true, std::move(h));
 		});
 }
 
 void VoiceConnection::Impl::send_mls_key_package(
 	asio::any_completion_handler<void(Result<>)> h) {
-	auto res = m_dave_manager->get_marshalled_key_package();
-	if (!res) {
-		asio::post(m_strand, [h = std::move(h), ec = res.error()]() mutable {
-			std::move(h)(ec);
+	if (!m_dave || !m_dave->session) {
+		asio::post(m_strand, [h = std::move(h)]() mutable {
+			std::move(h)(boost::system::errc::operation_not_permitted);
 		});
 		return;
 	}
-	send_voice_binary(
-		VoiceOpcode::DaveMlsKeyPackage, res.value(), std::move(h));
+
+	auto key_package = m_dave->session->get_marshalled_key_package();
+	if (key_package.empty()) {
+		asio::post(m_strand, [h = std::move(h)]() mutable {
+			std::move(h)(boost::system::errc::operation_not_permitted);
+		});
+		return;
+	}
+
+	std::vector<std::byte> key_pkg_bytes(
+		reinterpret_cast<const std::byte *>(key_package.data()),
+		reinterpret_cast<const std::byte *>(key_package.data()) +
+			key_package.size());
+
+	m_logger.info("Sending DaveMlsKeyPackage (size={})", key_pkg_bytes.size());
+
+	send_voice_binary(VoiceOpcode::DaveMlsKeyPackage,
+					  boost::span<const std::byte>(
+						  key_pkg_bytes.data(), key_pkg_bytes.size()),
+					  std::move(h));
 }
 
 void VoiceConnection::Impl::send_mls_commit_welcome(
 	std::vector<std::byte> payload,
 	asio::any_completion_handler<void(Result<>)> h) {
+	auto self = shared_from_this();
 	send_voice_binary(
 		VoiceOpcode::DaveMlsCommitWelcome,
 		boost::span<const std::byte>(payload.data(), payload.size()),
-		std::move(h));
+		[self, h = std::move(h)](Result<> r) mutable {
+			if (r) {
+				self->m_logger.info("Successfully sent DaveMlsCommitWelcome");
+				std::move(h)(outcome::success());
+			} else {
+				self->m_logger.error("Failed to send DaveMlsCommitWelcome: {}",
+									 r.error().message());
+				std::move(h)(r.error());
+			}
+		});
 }
 
 void VoiceConnection::Impl::send_mls_invalid_commit_welcome(
@@ -334,21 +394,63 @@ void VoiceConnection::Impl::send_mls_invalid_commit_welcome(
 }
 
 uint64_t VoiceConnection::Impl::compute_group_id() const {
-	if (auto r = parse_media_session_id_prefix_hex16(m_media_session_id)) {
-		return r.value();
+	return static_cast<uint64_t>(m_state.channel_id->id);
+}
+
+void VoiceConnection::Impl::update_ratchets() {
+	// Whenever a new user joins or a user leaves, this invalidates all old
+	// ratchets and they are replaced with new ones.
+
+	if (!m_dave || !m_dave->session) { return; }
+
+	constexpr auto ratchet_expiry = std::chrono::seconds(10);
+
+	m_logger.debug(
+		"Updating MLS ratchets for {} user(s)", m_dave_user_list.size() + 1);
+
+	// Update decryptors for all users in the roster
+	for (const auto &user_id : m_dave_user_list) {
+		if (user_id == m_state.user_id.id) { continue; }
+
+		auto user_id_str = std::to_string(user_id);
+		auto it = m_dave->decryptors.find(user_id_str);
+		if (it == m_dave->decryptors.end()) {
+			// New user - create decryptor
+			m_logger.debug(
+				"Inserting decryptor key ratchet for NEW user: {}, protocol "
+				"version: {}",
+				user_id, m_dave->session->get_protocol_version());
+			auto [iter, inserted] = m_dave->decryptors.emplace(
+				user_id_str, std::make_unique<dave::Decryptor>());
+			it = iter;
+		}
+
+		// Update the ratchet for this user (new or existing)
+		auto ratchet = m_dave->session->get_key_ratchet(user_id);
+		if (ratchet) {
+			it->second->transition_to_key_ratchet(
+				std::move(ratchet), ratchet_expiry);
+		}
 	}
 
-	std::string s = m_media_session_id.empty()
-						? fmt::to_string(*m_state.guild_id)
-						: m_media_session_id;
-	unsigned char out[crypto_generichash_BYTES];
-	crypto_generichash(
-		out, sizeof(out), reinterpret_cast<const unsigned char *>(s.data()),
-		s.size(), nullptr, 0);
+	// Update encryptor if present
+	if (m_dave->encryptor) {
+		m_logger.debug("Setting key ratchet for sending audio...");
+		auto sender_ratchet =
+			m_dave->session->get_key_ratchet(m_state.user_id.id);
+		if (sender_ratchet) {
+			m_dave->encryptor->set_key_ratchet(std::move(sender_ratchet));
+		}
+	}
 
-	uint64_t v = 0;
-	for (int i = 0; i < 8; ++i) { v = (v << 8) | out[i]; }
-	return v;
+	// Update privacy code from epoch authenticator
+	std::string old_code = m_dave->privacy_code;
+	auto authenticator = m_dave->session->get_last_epoch_authenticator();
+	m_dave->privacy_code = dave::generate_displayable_code(authenticator);
+
+	if (!m_dave->privacy_code.empty() && m_dave->privacy_code != old_code) {
+		m_logger.info("New E2EE Privacy Code: {}", m_dave->privacy_code);
+	}
 }
 
 }  // namespace ekizu

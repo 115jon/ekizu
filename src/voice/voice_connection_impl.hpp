@@ -1,6 +1,8 @@
 #ifndef VOICE_CONNECTION_IMPL_HPP
 #define VOICE_CONNECTION_IMPL_HPP
 
+#include <mls/crypto.h>
+
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/experimental/channel.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -9,7 +11,7 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/endian/conversion.hpp>
 #include <cstdint>
-#include <ekizu/dave_manager.hpp>
+#include <ekizu/logger.hpp>
 #include <ekizu/opus_codec.hpp>
 #include <ekizu/udp.hpp>
 #include <ekizu/voice_connection.hpp>
@@ -22,6 +24,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../dave/decryptor.hpp"
+#include "../dave/encryptor.hpp"
+#include "../dave/session.hpp"
 #include "voice_crypto.hpp"
 
 namespace ekizu {
@@ -96,7 +101,6 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 		return m_recv_chan;
 	}
 
-	void attach_logger(std::function<void(const Log &)> on_log);
 	void request_stop();
 
 	// Public API methods
@@ -114,7 +118,8 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 
    private:
 	// Logging
-	void log(std::string_view msg, LogLevel level = LogLevel::Debug) const;
+	ContextLogger<std::function<uint32_t()>> m_logger{
+		"voice_connection", [this] { return m_ssrc; }};
 
 	// Core components (from voice_websocket.cpp)
 	void ws_listen_loop();
@@ -163,6 +168,7 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 		asio::any_completion_handler<void(Result<>)> h);
 	void send_mls_invalid_commit_welcome(
 		uint16_t transition_id, asio::any_completion_handler<void(Result<>)> h);
+	void update_ratchets();	 // refresh all decryptors + privacy code
 
 	uint64_t compute_group_id() const;
 
@@ -191,8 +197,27 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 	// Transport encryption
 	VoiceCrypto m_crypto;
 
-	// DAVE/MLS state (uses networking, destroyed before ws/strand)
-	std::shared_ptr<DaveManager> m_dave_manager;
+	// DAVE/MLS state (matching icy-interstellar pattern)
+	struct DaveState {
+		std::unique_ptr<dave::Session> session;
+		std::unique_ptr<dave::Encryptor> encryptor;
+		std::unordered_map<std::string, std::unique_ptr<dave::Decryptor>>
+			decryptors;
+		dave::RosterMap cached_roster_map;
+		dave::TransitionId transition_id{0};
+		dave::ProtocolVersion protocol_version{0};
+		bool done_ready{false};
+		struct {
+			dave::TransitionId id{0};
+			dave::ProtocolVersion protocol_version{0};
+			bool is_pending{false};
+		} pending_transition;
+		std::string privacy_code;
+		std::shared_ptr<mlspp::SignaturePrivateKey> transient_key;
+	};
+	std::unique_ptr<DaveState> m_dave;
+	std::set<uint64_t> m_dave_user_list;
+	std::set<uint64_t> m_dave_pending_remove_list;
 	std::string m_media_session_id;
 	std::set<std::string> m_recognized_user_ids;
 	boost::container::flat_map<uint16_t, int> m_dave_transition_versions;
@@ -214,7 +239,6 @@ struct VoiceConnection::Impl : std::enable_shared_from_this<Impl> {
 	VoiceConnectionState m_connection_state{VoiceConnectionState::Disconnected};
 	bool m_disconnected{false};
 	bool m_speaking{false};
-	std::function<void(const Log &)> m_on_log;
 	int m_missed_heartbeats{0};
 	std::atomic<uint64_t> m_packet_count{0};
 	uint16_t m_rtp_sequence{0};

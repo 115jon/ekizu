@@ -2,6 +2,7 @@
 
 #include <ekizu/json_util.hpp>
 
+#include "../dave/persisted_key_pair.hpp"
 #include "voice_util.hpp"
 
 namespace ekizu {
@@ -14,18 +15,7 @@ VoiceConnection::Impl::Impl(
 	  m_state(std::move(state)),
 	  m_url(std::move(url)),
 	  m_token(std::move(token)),
-	  m_codec(std::move(codec)),
-	  m_dave_manager(
-		  std::make_shared<DaveManager>(fmt::to_string(m_state.user_id))) {}
-
-void VoiceConnection::Impl::attach_logger(
-	std::function<void(const Log &)> on_log) {
-	if (!on_log) { return; }
-	m_on_log = std::move(on_log);
-	m_dave_manager->set_logger([this](std::string_view msg) {
-		log(msg, LogLevel::Debug);
-	});
-}
+	  m_codec(std::move(codec)) {}
 
 void VoiceConnection::Impl::request_stop() {
 	m_disconnected = true;
@@ -49,14 +39,15 @@ void VoiceConnection::Impl::request_stop() {
 
 	if (m_ws) { m_ws->cancel(); }
 
-	if (m_dave_manager) { m_dave_manager->shutdown(); }
+	// Reset DAVE state
+	m_dave.reset();
 }
 
 void VoiceConnection::Impl::close(
 	asio::any_completion_handler<void(Result<>)> h) {
 	auto self = shared_from_this();
 	asio::dispatch(m_strand, [self, h = std::move(h)]() mutable {
-		self->log("Closing voice connection...", LogLevel::Info);
+		self->m_logger.info("Closing voice connection...");
 
 		self->m_heartbeat_running = false;
 		if (self->m_heartbeat_timer) { self->m_heartbeat_timer->cancel(); }
@@ -75,6 +66,13 @@ void VoiceConnection::Impl::close(
 				std::move(h)(close_res.error());
 				return;
 			}
+		}
+
+		if (!self->m_dave->session ||
+			!self->m_dave->session->has_external_sender()) {
+			self->m_logger.warn("MLS start skipped: No external sender key");
+			std::move(h)(outcome::success());
+			return;
 		}
 
 		if (!self->m_ws) {
@@ -112,7 +110,7 @@ void VoiceConnection::Impl::reconnect(
 			return;
 		}
 
-		self->log("Reconnecting to voice server...", LogLevel::Info);
+		self->m_logger.info("Reconnecting to voice server...");
 
 		nlohmann::json payload{
 			{"op", static_cast<uint8_t>(VoiceOpcode::Resume)},
@@ -134,7 +132,7 @@ void VoiceConnection::Impl::run(
 			return;
 		}
 
-		self->log("Starting voice connection...", LogLevel::Info);
+		self->m_logger.info("Starting voice connection...");
 		self->m_ready_chan.emplace(self->m_strand.get_inner_executor());
 
 		if (!self->m_ws) {
@@ -150,8 +148,8 @@ void VoiceConnection::Impl::run(
 					self->m_ws.emplace(std::move(ws_res.value()));
 					self->ws_listen_loop();
 
-					self->log("Waiting for voice connection ready...",
-							  LogLevel::Debug);
+					self->m_logger.debug(
+						"Waiting for voice connection ready...");
 					self->m_ready_chan->async_receive(
 						[self, h = std::move(h)](boost::system::error_code ec,
 												 boost::blank) mutable {
@@ -159,8 +157,7 @@ void VoiceConnection::Impl::run(
 								std::move(h)(ec);
 								return;
 							}
-							self->log(
-								"Voice connection ready!", LogLevel::Info);
+							self->m_logger.info("Voice connection ready!");
 							std::move(h)(outcome::success());
 						});
 				});
@@ -168,7 +165,7 @@ void VoiceConnection::Impl::run(
 		}
 
 		self->ws_listen_loop();
-		self->log("Waiting for voice connection ready...", LogLevel::Debug);
+		self->m_logger.debug("Waiting for voice connection ready...");
 		self->m_ready_chan->async_receive(
 			[self, h = std::move(h)](
 				boost::system::error_code ec, boost::blank) mutable {
@@ -176,7 +173,7 @@ void VoiceConnection::Impl::run(
 					std::move(h)(ec);
 					return;
 				}
-				self->log("Voice connection ready!", LogLevel::Info);
+				self->m_logger.info("Voice connection ready!");
 				std::move(h)(outcome::success());
 			});
 	});
@@ -289,8 +286,20 @@ void VoiceConnection::Impl::setup_udp_async(
 	std::string ip = data["d"]["ip"].get<std::string>();
 	uint16_t port = data["d"]["port"].get<uint16_t>();
 
-	m_dave_manager->assign_ssrc_to_codec(m_ssrc, discord::dave::Codec::Opus);
-	m_dave_manager->set_passthrough_mode(true);
+	// Initialize DAVE state if needed
+	if (!m_dave) {
+		m_dave = std::make_unique<DaveState>();
+		m_dave->encryptor = std::make_unique<dave::Encryptor>();
+		m_dave->session = std::make_unique<dave::Session>(
+			nullptr, m_state.session_id,
+			[self](const std::string &type, const std::string &reason) {
+				self->m_logger.warn("DAVE Error [{}]: {}", type, reason);
+			});
+		m_dave->transient_key = dave::get_persisted_key_pair(
+			"ekizu_voice", fmt::to_string(m_state.user_id), dave::KEY_VERSION);
+	}
+	m_dave->encryptor->assign_ssrc_to_codec(m_ssrc, dave::Codec::Opus);
+	m_dave->encryptor->set_passthrough_mode(true);
 
 	// Bind a local socket (Rust-style), then connect to the Discord voice peer.
 	// Use an address family wildcard that matches the discovered peer.
@@ -326,53 +335,49 @@ void VoiceConnection::Impl::setup_udp_async(
 
 					auto pkt_span =
 						boost::span<const std::byte>(pkt->data(), pkt->size());
-					self->m_udp->send(
-						pkt_span, [self, pkt, h = std::move(h)](
-									  Result<size_t> send_res) mutable {
-							if (!send_res) {
-								std::move(h)(send_res.error());
+					self->m_udp->send(pkt_span, [self, pkt, h = std::move(h)](
+													Result<size_t>
+														send_res) mutable {
+						if (!send_res) {
+							std::move(h)(send_res.error());
+							return;
+						}
+
+						self->m_udp->receive([self, h = std::move(h)](
+												 Result<std::string>
+													 recv_res) mutable {
+							if (!recv_res) {
+								std::move(h)(recv_res.error());
 								return;
 							}
 
-							self->m_udp->receive([self, h = std::move(h)](
-													 Result<std::string>
-														 recv_res) mutable {
-								if (!recv_res) {
-									std::move(h)(recv_res.error());
-									return;
-								}
+							const auto &res = recv_res.value();
+							if (res.size() < 74) {
+								std::move(h)(boost::system::errc::message_size);
+								return;
+							}
 
-								const auto &res = recv_res.value();
-								if (res.size() < 74) {
-									std::move(h)(
-										boost::system::errc::message_size);
-									return;
-								}
+							auto ip_view = std::string_view(res).substr(8, 64);
+							ip_view = ip_view.substr(0, ip_view.find('\0'));
 
-								auto ip_view =
-									std::string_view(res).substr(8, 64);
-								ip_view = ip_view.substr(0, ip_view.find('\0'));
+							uint16_t ext_port{};
+							std::memcpy(
+								&ext_port, res.data() + res.size() - 2, 2);
+							ext_port = boost::endian::big_to_native(ext_port);
 
-								uint16_t ext_port{};
-								std::memcpy(
-									&ext_port, res.data() + res.size() - 2, 2);
-								ext_port =
-									boost::endian::big_to_native(ext_port);
+							nlohmann::json payload{
+								{"op", static_cast<uint8_t>(
+										   VoiceOpcode::SelectProtocol)},
+								{"d",
+								 {{"protocol", "udp"},
+								  {"data",
+								   {{"address", ip_view},
+									{"port", ext_port},
+									{"mode", "aead_aes256_gcm_rtpsize"}}}}}};
 
-								nlohmann::json payload{
-									{"op", static_cast<uint8_t>(
-											   VoiceOpcode::SelectProtocol)},
-									{"d",
-									 {{"protocol", "udp"},
-									  {"data",
-									   {{"address", ip_view},
-										{"port", ext_port},
-										{"mode",
-										 to_string(self->m_crypto.mode)}}}}}};
-
-								self->m_ws->send(payload.dump(), std::move(h));
-							});
+							self->m_ws->send(payload.dump(), std::move(h));
 						});
+					});
 				});
 		});
 }
@@ -392,13 +397,11 @@ void VoiceConnection::Impl::handle_session_description_async(
 		std::vector<uint8_t> key =
 			data["d"]["secret_key"].get<std::vector<uint8_t>>();
 
-		self->log(fmt::format("🔑 Extracted secret key: {} bytes", key.size()),
-				  LogLevel::Info);
+		self->m_logger.info("🔑 Extracted secret key: {} bytes", key.size());
 
 		if (key.size() != 32) {
-			self->log(fmt::format(
-						  "❌ Invalid key size: {} (expected 32)", key.size()),
-					  LogLevel::Error);
+			self->m_logger.error(
+				"❌ Invalid key size: {} (expected 32)", key.size());
 		}
 
 		self->m_crypto.key.resize(key.size());
@@ -411,22 +414,40 @@ void VoiceConnection::Impl::handle_session_description_async(
 		} else if (mode_str == "aead_aes256_gcm_rtpsize") {
 			self->m_crypto.mode = VoiceTransportMode::AES256_GCM_RTPSIZE;
 		} else {
-			self->log(
-				"Unsupported encryption mode: " + mode_str, LogLevel::Error);
+			self->m_logger.error("Unsupported encryption mode: {}", mode_str);
 			std::move(h)(boost::system::errc::not_supported);
 			return;
 		}
 
-		self->log(fmt::format("✅ Session description: mode={}, key_size={}",
-							  mode_str, key.size()),
-				  LogLevel::Info);
+		self->m_logger.info("✅ Session description: mode={}, key_size={}",
+							mode_str, key.size());
 
-		int version = 0;
+		if (data["d"].contains("dave_protocol_version")) {
+			if (!data["d"]["dave_protocol_version"].is_null()) {
+				int version = data["d"]["dave_protocol_version"].get<int>();
+				self->m_logger.info(
+					"DAVE Protocol Version in Session Description: {}",
+					version);
+			} else {
+				self->m_logger.warn("DAVE Protocol Version is NULL");
+			}
+		} else {
+			self->m_logger.warn(
+				"DAVE Protocol Version MISSING from Session Description");
+			self->m_logger.debug("Full payload: {}", data.dump());
+		}
+
+		int version{};
 		if (data["d"].contains("dave_protocol_version") &&
 			!data["d"]["dave_protocol_version"].is_null()) {
 			version = data["d"]["dave_protocol_version"].get<int>();
 		}
-		self->m_dave_manager->set_protocol_version(version);
+		if (self->m_dave) {
+			self->m_dave->protocol_version =
+				static_cast<dave::ProtocolVersion>(version);
+			self->m_dave->session->set_protocol_version(
+				static_cast<dave::ProtocolVersion>(version));
+		}
 
 		auto after_mls = [self, h = std::move(h)](Result<> r) mutable {
 			if (!r) {
@@ -447,7 +468,7 @@ void VoiceConnection::Impl::handle_session_description_async(
 			std::move(h)(outcome::success());
 		};
 
-		if (self->m_dave_manager->protocol_version() > 0) {
+		if (self->m_dave && self->m_dave->protocol_version > 0) {
 			self->m_warned_waiting_for_e2ee = false;
 			self->maybe_start_mls_async(false, std::move(after_mls));
 			return;
@@ -455,13 +476,6 @@ void VoiceConnection::Impl::handle_session_description_async(
 
 		after_mls(outcome::success());
 	});
-}
-
-void VoiceConnection::Impl::log(std::string_view msg, LogLevel level) const {
-	if (m_on_log) {
-		m_on_log(Log{level, fmt::format("voice_connection{{ssrc={}}}: {}",
-										m_ssrc, msg)});
-	}
 }
 
 }  // namespace ekizu

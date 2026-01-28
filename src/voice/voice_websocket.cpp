@@ -33,7 +33,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 							", close_code: {}, close_reason: {}",
 							close_reason->code, close_reason->reason);
 					}
-					me->impl->log(msg, LogLevel::Error);
+					me->impl->m_logger.error(msg);
 
 					// Check if we can resume based on close code
 					uint16_t close_code =
@@ -100,7 +100,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 
 							nlohmann::json id_payload;
 							if (resuming) {
-								me->impl->log("Sending Resume", LogLevel::Info);
+								me->impl->m_logger.info("Sending Resume");
 								id_payload = {
 									{"op",
 									 static_cast<uint8_t>(VoiceOpcode::Resume)},
@@ -113,8 +113,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 									  {"token", me->impl->m_token},
 									  {"seq_ack", me->impl->m_last_seq}}}};
 							} else {
-								me->impl->log(
-									"Sending Identify", LogLevel::Info);
+								me->impl->m_logger.info("Sending Identify");
 								me->impl->m_connection_state =
 									VoiceConnectionState::Identifying;
 								id_payload = {
@@ -131,8 +130,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 									   me->impl->m_state.session_id},
 									  {"token", me->impl->m_token},
 									  {"max_dave_protocol_version",
-									   discord::dave::
-										   MaxSupportedProtocolVersion()}}}};
+									   dave::max_protocol_version()}}}};
 							}
 
 							me->impl->m_ws->send(
@@ -142,8 +140,7 @@ void VoiceConnection::Impl::ws_listen_loop() {
 						}
 
 						case VoiceOpcode::Resumed:
-							me->impl->log(
-								"Resumed successfully", LogLevel::Info);
+							me->impl->m_logger.info("Resumed successfully");
 							me->impl->m_connection_state =
 								VoiceConnectionState::Ready;
 							me->impl->m_missed_heartbeats = 0;
@@ -181,12 +178,10 @@ void VoiceConnection::Impl::ws_listen_loop() {
 											user_id_json.get<std::string>();
 										me->impl->m_recognized_user_ids.insert(
 											user_id);
-										me->impl->log(
-											fmt::format(
-												"User {} connected (now "
-												"recognized for MLS)",
-												user_id),
-											LogLevel::Info);
+										me->impl->m_logger.info(
+											"User {} connected (now recognized "
+											"for MLS)",
+											user_id);
 									}
 								}
 							}
@@ -201,11 +196,10 @@ void VoiceConnection::Impl::ws_listen_loop() {
 								std::string user_id =
 									data["d"]["user_id"].get<std::string>();
 								me->impl->m_recognized_user_ids.erase(user_id);
-								me->impl->log(
-									fmt::format("User {} disconnected (removed "
-												"from recognized MLS users)",
-												user_id),
-									LogLevel::Info);
+								me->impl->m_logger.info(
+									"User {} disconnected (removed from "
+									"recognized MLS users)",
+									user_id);
 							}
 							break;
 						}
@@ -223,14 +217,16 @@ void VoiceConnection::Impl::ws_listen_loop() {
 							int protocol_version =
 								data["d"].contains("protocol_version")
 									? data["d"]["protocol_version"].get<int>()
-									: me->impl->m_dave_manager
-										  ->protocol_version();
+									: (me->impl->m_dave
+										   ? static_cast<int>(
+												 me->impl->m_dave
+													 ->protocol_version)
+										   : 0);
 
-							me->impl->log(
-								fmt::format("Received DavePrepareTransition: "
-											"tid={}, version={}",
-											transition_id, protocol_version),
-								LogLevel::Info);
+							me->impl->m_logger.info(
+								"Received DavePrepareTransition: tid={}, "
+								"version={}",
+								transition_id, protocol_version);
 
 							// Store pending transition version
 							me->impl
@@ -239,31 +235,34 @@ void VoiceConnection::Impl::ws_listen_loop() {
 
 							// transition_id = 0 means immediate execution
 							if (transition_id == 0) {
-								if (me->impl->m_dave_manager
-										->commit_pending_group()) {
-									me->impl->log(
+								// For sole member, session already ready
+								if (me->impl->m_dave &&
+									me->impl->m_dave->session &&
+									me->impl->m_dave->session
+										->has_current_state()) {
+									me->impl->m_logger.info(
 										"Activated pending group for sole "
-										"member",
-										LogLevel::Info);
+										"member");
 									me->impl->execute_dave_transition_now_async(
 										protocol_version,
 										[me](Result<>) mutable { me->step(); });
 									return;
 								}
-								me->impl->log(
-									"Failed to activate pending group",
-									LogLevel::Error);
+								me->impl->m_logger.error(
+									"Failed to activate pending group");
 								break;
 							}
 
 							// Downgrade to transport-only encryption
 							if (protocol_version == 0) {
-								me->impl->log(
-									"Preparing for downgrade to passthrough",
-									LogLevel::Info);
+								me->impl->m_logger.info(
+									"Preparing for downgrade to passthrough");
 								// Enable passthrough on receive side now
-								me->impl->m_dave_manager->set_passthrough_mode(
-									true);
+								if (me->impl->m_dave &&
+									me->impl->m_dave->encryptor) {
+									me->impl->m_dave->encryptor
+										->set_passthrough_mode(true);
+								}
 							}
 
 							// Send ready_for_transition acknowledgement
@@ -291,7 +290,10 @@ void VoiceConnection::Impl::ws_listen_loop() {
 
 							// Look up the protocol version from prepare phase
 							int protocol_version =
-								me->impl->m_dave_manager->protocol_version();
+								me->impl->m_dave
+									? static_cast<int>(
+										  me->impl->m_dave->protocol_version)
+									: 0;
 							auto it = me->impl->m_dave_transition_versions.find(
 								transition_id);
 							if (it !=
@@ -300,11 +302,9 @@ void VoiceConnection::Impl::ws_listen_loop() {
 								me->impl->m_dave_transition_versions.erase(it);
 							}
 
-							me->impl->log(
-								fmt::format("Executing DAVE transition: "
-											"tid={}, version={}",
-											transition_id, protocol_version),
-								LogLevel::Info);
+							me->impl->m_logger.info(
+								"Executing DAVE transition: tid={}, version={}",
+								transition_id, protocol_version);
 
 							me->impl->execute_dave_transition_now_async(
 								protocol_version,
@@ -330,19 +330,23 @@ void VoiceConnection::Impl::ws_listen_loop() {
 									data["d"]["protocol_version"].get<int>();
 							}
 
-							me->impl->log(
-								fmt::format(
-									"Received DavePrepareEpoch: epoch=1, "
-									"version={} - creating new MLS group",
-									protocol_version),
-								LogLevel::Info);
-
-							// Set the new protocol version BEFORE reset
-							me->impl->m_dave_manager->set_protocol_version(
+							me->impl->m_logger.info(
+								"Received DavePrepareEpoch: epoch=1, "
+								"version={} - creating new MLS group",
 								protocol_version);
 
-							// Reset the MLS session
-							me->impl->m_dave_manager->reset_session();
+							// Set the new protocol version BEFORE reset
+							if (me->impl->m_dave && me->impl->m_dave->session) {
+								me->impl->m_dave->protocol_version =
+									static_cast<dave::ProtocolVersion>(
+										protocol_version);
+								me->impl->m_dave->session->set_protocol_version(
+									static_cast<dave::ProtocolVersion>(
+										protocol_version));
+
+								// Reset the MLS session
+								me->impl->m_dave->session->reset();
+							}
 
 							// Re-initialize and send a new key package
 							me->impl->maybe_start_mls_async(

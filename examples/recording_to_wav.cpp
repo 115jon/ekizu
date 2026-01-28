@@ -22,10 +22,6 @@ struct Args {
 	int channels = 2;
 };
 
-bool starts_with(const std::string &s, const char *prefix) {
-	return s.rfind(prefix, 0) == 0;
-}
-
 std::optional<std::uint32_t> parse_u32(const std::string &s) {
 	try {
 		std::size_t idx = 0;

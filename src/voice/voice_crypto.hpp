@@ -9,11 +9,10 @@
 #include <ekizu/voice_types.hpp>
 #include <vector>
 
-
 namespace ekizu {
 
 struct VoiceCrypto {
-	VoiceTransportMode mode = VoiceTransportMode::XChaCha20_Poly1305_RTPSIZE;
+	VoiceTransportMode mode = VoiceTransportMode::AES256_GCM_RTPSIZE;
 	std::vector<std::byte> key;
 	uint32_t nonce = 0;
 

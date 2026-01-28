@@ -43,20 +43,6 @@ async_main(const asio::yield_context &yield) {
 	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
-	// Attach logger to shard.
-	shard.attach_logger([](const Log &log) {
-		const auto &msg = log.message;
-
-		switch (log.level) {
-			case LogLevel::Debug: return get_logger()->debug(msg);
-			case LogLevel::Info: return get_logger()->info(msg);
-			case LogLevel::Warn: return get_logger()->warn(msg);
-			case LogLevel::Error: return get_logger()->error(msg);
-			case LogLevel::Trace: return get_logger()->trace(msg);
-			case LogLevel::Critical: return get_logger()->critical(msg);
-		}
-	});
-
 	while (true) {
 		auto res = shard.next_event(yield);
 
@@ -115,7 +101,7 @@ Result<> handle_event(Snowflake &bot_id, const Event &ev, HttpClient &http,
 						.send(yield);
 				}
 			},
-			[&logger](const Log &log) { logger->debug(log.message); },
+			// [&logger](const Log &log) { logger->debug(log.message); },
 			[&logger](const auto &e) {
 				logger->info("Uncaught {} event: {}", typeid(e).name(),
 							 nlohmann::json{e}.dump());

@@ -9,7 +9,7 @@
 #include <ekizu/event.hpp>
 #include <ekizu/inflater.hpp>
 #include <ekizu/intents.hpp>
-#include <ekizu/log.hpp>
+#include <ekizu/logger.hpp>
 #include <ekizu/ws.hpp>
 
 namespace ekizu {
@@ -102,8 +102,6 @@ struct Shard {
 	[[nodiscard]] asio::any_io_executor get_executor() const {
 		return m_strand;
 	}
-
-	EKIZU_EXPORT void attach_logger(std::function<void(Log)> on_log);
 
 	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
 	auto close(CloseFrame reason, CompletionToken &&token) {
@@ -218,7 +216,7 @@ struct Shard {
 	void send_resume_async(asio::any_completion_handler<void(Result<>)> h);
 	void reconnect_async(asio::any_completion_handler<void(Result<>)> h);
 
-	void log(std::string_view msg, LogLevel level = LogLevel::Debug) const;
+	PrefixedLogger m_logger;
 
 	asio::strand<asio::any_io_executor> m_strand;
 	std::optional<asio::steady_timer> m_timer;
@@ -226,7 +224,6 @@ struct Shard {
 	Config m_config;
 	bool m_last_heartbeat_acked{true};
 	uint32_t m_heartbeat_interval{};
-	std::function<void(Log)> m_on_log;
 	/// May or may not be used based on runtime options.
 	std::optional<Inflater> m_inflater;
 	std::optional<Session> m_session;

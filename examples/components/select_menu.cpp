@@ -24,10 +24,6 @@ async_main(const asio::yield_context &yield) {
 	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
 
-	shard.attach_logger([](const Log &log) {
-		fmt::println("{}", log.message);
-	});
-
 	while (true) {
 		try {
 			auto res = shard.next_event(yield);

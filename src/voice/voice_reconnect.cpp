@@ -7,8 +7,8 @@ namespace ekizu {
 void VoiceConnection::Impl::initiate_reconnect() {
 	// Don't reconnect if we've been intentionally disconnected
 	if (m_disconnected) {
-		log("Skipping reconnect - connection was intentionally closed",
-			LogLevel::Info);
+		m_logger.info(
+			"Skipping reconnect - connection was intentionally closed");
 		return;
 	}
 
@@ -22,10 +22,10 @@ void VoiceConnection::Impl::initiate_reconnect() {
 	bool can_resume = (m_connection_state == VoiceConnectionState::Ready);
 
 	if (can_resume) {
-		log("Initiating Resume reconnect", LogLevel::Info);
+		m_logger.info("Initiating Resume reconnect");
 		m_connection_state = VoiceConnectionState::Resuming;
 	} else {
-		log("Initiating fresh reconnect", LogLevel::Info);
+		m_logger.info("Initiating fresh reconnect");
 		m_connection_state = VoiceConnectionState::Connecting;
 	}
 
@@ -46,22 +46,21 @@ void VoiceConnection::Impl::initiate_reconnect() {
 			// Re-check disconnected flag - close may have been called while
 			// waiting
 			if (self->m_disconnected) {
-				self->log("Skipping reconnect - connection closed during wait",
-						  LogLevel::Info);
+				self->m_logger.info(
+					"Skipping reconnect - connection closed during wait");
 				return;
 			}
 
 			self->connect_ws_async([self](Result<> r) {
 				if (!r) {
-					self->log(fmt::format(
-								  "Reconnect failed: {}", r.error().message()),
-							  LogLevel::Error);
+					self->m_logger.error(
+						"Reconnect failed: {}", r.error().message());
 					self->m_connection_state = VoiceConnectionState::Closed;
 					self->m_disconnected = true;
 					return;
 				}
 
-				self->log("Reconnected successfully", LogLevel::Info);
+				self->m_logger.info("Reconnected successfully");
 			});
 		});
 }

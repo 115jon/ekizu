@@ -9,7 +9,7 @@ constexpr uint8_t CHANNEL_COUNT = 2;
 constexpr uint16_t FRAME_COUNT = 960;
 constexpr uint32_t SAMPLE_RATE = 48'000;
 
-enum class VoiceTransportMode {
+enum class VoiceTransportMode : uint8_t {
 	XChaCha20_Poly1305_RTPSIZE,
 	AES256_GCM_RTPSIZE,
 };

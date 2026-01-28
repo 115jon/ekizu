@@ -45,9 +45,8 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 			impl->m_udp->receive([me = shared_from_this()](
 									 Result<std::string> recv_res) mutable {
 				if (!recv_res) {
-					me->impl->log(fmt::format("UDP receive error: {}",
-											  recv_res.error().message()),
-								  LogLevel::Warn);
+					me->impl->m_logger.warn(
+						"UDP receive error: {}", recv_res.error().message());
 					return;
 				}
 
@@ -114,15 +113,14 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 					n3 = static_cast<std::uint8_t>(last4[3]);
 				}
 
-				impl->log(
-					fmt::format("Transport decrypt failed: {} (b0=0x{:02x} "
-								"cc={} x={} p={} "
-								"aad_len={} pkt_len={} enc_len={} ext_words={} "
-								"nonce={:02x}{:02x}{:02x}{:02x})",
-								decrypted_res.error().message(), b0, cc, x, p,
-								aad_len, bytes.size(), encrypted_payload.size(),
-								ext_len_words, n0, n1, n2, n3),
-					LogLevel::Debug);
+				impl->m_logger.debug(
+					"Transport decrypt failed: {} (b0=0x{:02x} "
+					"cc={} x={} p={} "
+					"aad_len={} pkt_len={} enc_len={} ext_words={} "
+					"nonce={:02x}{:02x}{:02x}{:02x})",
+					decrypted_res.error().message(), b0, cc, x, p, aad_len,
+					bytes.size(), encrypted_payload.size(), ext_len_words, n0,
+					n1, n2, n3);
 				return;
 			}
 
@@ -145,13 +143,12 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 			const uint16_t sequence = voice::read_u16be(bytes.subspan(2, 2));
 			const uint32_t timestamp = voice::read_u32be(bytes.subspan(4, 4));
 
-			// If E2EE is enabled, do not emit transport-only audio; drop until
-			// DAVE is ready so you only record real audio.
-			if (impl->m_dave_manager &&
-				impl->m_dave_manager->is_e2ee_enabled()) {
-				// Wait until we can attempt decryption (sender ready)
-				if (!impl->m_dave_manager->can_attempt_decrypt()) { return; }
+			// Check if DAVE is enabled
+			bool dave_enabled =
+				impl->m_dave && impl->m_dave->protocol_version > 0 &&
+				!impl->m_dave->decryptors.empty();
 
+			if (dave_enabled) {
 				auto it = impl->m_ssrc_to_user_id.find(ssrc);
 				if (it == impl->m_ssrc_to_user_id.end()) { return; }
 
@@ -175,9 +172,8 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 						boost::system::error_code{}, std::move(pkt),
 						[impl = impl](boost::system::error_code ec) {
 							if (ec && !impl->m_disconnected) {
-								impl->log(fmt::format("Channel send failed: {}",
-													  ec.message()),
-										  LogLevel::Warn);
+								impl->m_logger.warn(
+									"Channel send failed: {}", ec.message());
 							}
 						});
 					return;
@@ -186,18 +182,29 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 				constexpr std::size_t min_dave_frame_size = 44;
 				if (media_payload.size() < min_dave_frame_size) { return; }
 
+				// Find decryptor for user
+				auto decryptor_it = impl->m_dave->decryptors.find(user_id);
+				if (decryptor_it == impl->m_dave->decryptors.end()) { return; }
+
 				std::vector<std::byte> plaintext(media_payload.size());
-				auto decrypt_res = impl->m_dave_manager->decrypt_frame(
-					discord::dave::MediaType::Audio, user_id,
-					boost::span<const std::byte>(
-						media_payload.data(), media_payload.size()),
-					boost::span<std::byte>(plaintext.data(), plaintext.size()));
+				auto decrypt_res = decryptor_it->second->decrypt(
+					dave::MediaType::Audio,
+					boost::span<const uint8_t>(
+						reinterpret_cast<const uint8_t *>(media_payload.data()),
+						media_payload.size()),
+					boost::span<uint8_t>(
+						reinterpret_cast<uint8_t *>(plaintext.data()),
+						plaintext.size()));
 
 				if (!decrypt_res) { return; }
 
 				// First successful decrypt - mark transition complete
-				if (!impl->m_dave_manager->is_transition_complete()) {
-					impl->m_dave_manager->set_transition_complete(true);
+				if (!impl->m_dave->done_ready) {
+					impl->m_logger.info(
+						"✅ DAVE Decryption Success! Received encrypted audio "
+						"from {}",
+						user_id);
+					impl->m_dave->done_ready = true;
 				}
 
 				plaintext.resize(decrypt_res.value());
@@ -213,9 +220,8 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 					boost::system::error_code{}, std::move(pkt),
 					[impl = impl](boost::system::error_code ec) {
 						if (ec && !impl->m_disconnected) {
-							impl->log(fmt::format("Channel send failed: {}",
-												  ec.message()),
-									  LogLevel::Warn);
+							impl->m_logger.warn(
+								"Channel send failed: {}", ec.message());
 						}
 					});
 				return;
@@ -240,9 +246,8 @@ void VoiceConnection::Impl::udp_receiver_loop() {
 				boost::system::error_code{}, std::move(pkt),
 				[impl = impl](boost::system::error_code ec) {
 					if (ec && !impl->m_disconnected) {
-						impl->log(fmt::format(
-									  "Channel send failed: {}", ec.message()),
-								  LogLevel::Warn);
+						impl->m_logger.warn(
+							"Channel send failed: {}", ec.message());
 					}
 				});
 		}
@@ -261,12 +266,24 @@ void VoiceConnection::Impl::on_speaking(std::string user_id, uint32_t ssrc,
 			m_user_id_to_ssrc[user_id] = ssrc;
 			m_recognized_user_ids.insert(user_id);
 
-			log(fmt::format("User {} is speaking with SSRC {}", user_id, ssrc),
-				LogLevel::Debug);
+			m_logger.debug("User {} is speaking with SSRC {}", user_id, ssrc);
 
-			if (m_dave_manager && m_dave_manager->is_e2ee_enabled() &&
-				m_dave_manager->has_joined_via_welcome()) {
-				(void)m_dave_manager->install_receiver_ratchet(user_id);
+			// Install decryptor for user if DAVE enabled and session ready
+			if (m_dave && m_dave->session &&
+				m_dave->session->has_current_state()) {
+				// Try to get key ratchet for this user
+				uint64_t numeric_user_id{};
+				try {
+					numeric_user_id = std::stoull(user_id);
+				} catch (...) { return; }
+
+				auto ratchet =
+					m_dave->session->get_key_ratchet(numeric_user_id);
+				if (ratchet) {
+					auto decryptor = std::make_unique<dave::Decryptor>();
+					decryptor->transition_to_key_ratchet(std::move(ratchet));
+					m_dave->decryptors[user_id] = std::move(decryptor);
+				}
 			}
 		}
 	});

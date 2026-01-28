@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include "ekizu/log.hpp"
 #include "ekizu/result.hpp"
 #include "ekizu/voice_state.hpp"
 #include "snowflake.hpp"
@@ -112,8 +111,6 @@ struct VoiceConnection {
 			},
 			token);
 	}
-
-	EKIZU_EXPORT void attach_logger(std::function<void(const Log &)> on_log);
 
 	template <BOOST_ASIO_COMPLETION_TOKEN_FOR(void(Result<>)) CompletionToken>
 	auto close(CompletionToken &&token) {

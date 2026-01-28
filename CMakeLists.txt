@@ -124,7 +124,8 @@ if(EKIZU_USE_SYSTEM_BOOST)
 else()
     # Use vcpkg's Boost (CONFIG mode)
     find_package(
-        Boost CONFIG REQUIRED COMPONENTS asio charconv filesystem coroutine url
+        Boost CONFIG REQUIRED COMPONENTS asio charconv container filesystem
+                                         coroutine url
     )
     message(STATUS "Using vcpkg Boost: ${Boost_VERSION}")
 endif()
@@ -136,27 +137,30 @@ find_package(Opus CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(MLSPP CONFIG REQUIRED)
-find_package(libdave CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 target_compile_definitions(ekizu PUBLIC BOOST_ASIO_NO_DEPRECATED)
+
+# Common dependencies
+target_link_libraries(
+    ekizu
+    PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
+    PRIVATE ZLIB::ZLIB Opus::opus unofficial-sodium::sodium spdlog::spdlog
+            MLSPP::mlspp
+)
 
 if(EKIZU_USE_SYSTEM_BOOST)
     # System Boost: use Boost::boost for all header-only libs + include dirs
     target_include_directories(ekizu PUBLIC ${Boost_INCLUDE_DIRS})
     target_link_libraries(
         ekizu
-        PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
-               Boost::coroutine
-        PRIVATE Boost::filesystem ZLIB::ZLIB Opus::opus
-                unofficial-sodium::sodium libdave::libdave
+        PUBLIC Boost::coroutine
+        PRIVATE Boost::filesystem
     )
 else()
     # vcpkg Boost: explicit targets for all libs
     target_link_libraries(
-        ekizu
-        PUBLIC fmt::fmt nlohmann_json::nlohmann_json certify::core
-        PRIVATE Boost::charconv Boost::url ZLIB::ZLIB Opus::opus
-                unofficial-sodium::sodium libdave::libdave
+        ekizu PRIVATE Boost::charconv Boost::container Boost::url
     )
 endif()
 

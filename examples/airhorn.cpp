@@ -43,6 +43,7 @@ Result<> load_sound() {
 	}
 
 	int16_t opuslen{};
+	size_t total_bytes{};
 
 	while (true) {
 		auto read = file.read(&opuslen, sizeof(opuslen), ec);
@@ -64,10 +65,13 @@ Result<> load_sound() {
 		// EOF
 		if (read == 0) { break; }
 
+		total_bytes += buffer.size();
 		samples.emplace_back(std::move(buffer));
 	}
 
 	fmt::println("Loaded {} samples from airhorn.dca!", samples.size());
+	fmt::println(
+		"AUDIO_STATS: samples={}, total_bytes={}", samples.size(), total_bytes);
 	return outcome::success();
 }
 
@@ -75,6 +79,7 @@ async_main(const asio::yield_context &yield) {
 	const std::string token{std::getenv("DISCORD_TOKEN")};
 	HttpClient http{yield.get_executor(), token};
 	Shard shard{yield.get_executor(), ShardId::ONE, token, Intents::AllIntents};
+	ekizu::init_logger();
 
 	EKIZU_TRY(load_sound());
 
@@ -130,17 +135,53 @@ Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 			} else if constexpr (std::is_same_v<T, Ready>) {
 				fmt::println("{} is ready!", event.user.username);
 
-				EKIZU_TRY(shard.update_presence(
-					{
-						{
+				// Auto-join logic for testing
+				const char *env_guild = std::getenv("TEST_GUILD_ID");
+				const char *env_channel = std::getenv("TEST_CHANNEL_ID");
 
+				if (env_guild && env_channel) {
+					Snowflake guild_id(std::stoull(env_guild));
+					Snowflake channel_id(std::stoull(env_channel));
+
+					fmt::println("Auto-joining Guild {} Channel {}...",
+								 guild_id, channel_id);
+					EKIZU_TRY(
+						shard.join_voice_channel(guild_id, channel_id, yield));
+
+					// We need to wait for voice server update, which is handled
+					// in that event case But we need to trigger the connection
+					// flow. The existing flow waits for VoiceServerUpdate to
+					// populate config, then MessageCreate triggers the
+					// connection. We'll move the connection trigger to
+					// VoiceServerUpdate or spawn it here? Actually,
+					// VoiceServerUpdate fills the config. We need to consume
+					// it. Let's spawn a coroutine that waits for the config
+					// channel.
+
+					const auto *config = channel->async_receive(yield);
+					asio::spawn(
+						yield,
+						[config, &shard, guild_id](auto y) {
+							// Wait a bit for state to propagate? usually
+							// channel recv is enough
+							auto res =
+								start_voice_connection(*config, y, shard);
+							if (!res) {
+								fmt::println(stderr, "Auto-play failed: {}",
+											 res.error().message());
+							} else {
+								fmt::println(
+									"Auto-play finished successfully.");
+							}
 						},
-						{{
-							">airhorn",
-							ActivityType::Playing,
-						}},
-						Status::DoNotDisturb,
-					},
+						asio::detached);
+				}
+
+				EKIZU_TRY(shard.update_presence(
+					{{},
+					 {{">airhorn", ActivityType::Playing}},
+					 Status::DoNotDisturb,
+					 {}},
 					yield));
 			} else if constexpr (std::is_same_v<T, VoiceStateUpdate>) {
 				if (event.voice_state.guild_id) {
@@ -157,6 +198,7 @@ Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 					boost::system::error_code{}, &voice_configs[event.guild_id],
 					[](const boost::system::error_code &) {});
 			} else if constexpr (std::is_same_v<T, MessageCreate>) {
+				// Keep existing command logic for manual testing
 				const auto &[msg_a] = event;
 				const Message &msg = msg_a;
 
@@ -187,16 +229,9 @@ Result<> handle_event(const Event &ev, HttpClient &http, Shard &shard,
 					yield,
 					[config, &shard](auto y) {
 						auto res = start_voice_connection(*config, y, shard);
-
 						if (!res) {
-							auto ec = res.error();
 							fmt::println(
-								stderr, "ec: {} (value={}, category={})",
-								ec.message(), ec.value(), ec.category().name());
-
-							fmt::println(
-								stderr, "Failed to start voice connection: {}",
-								res.error().message());
+								stderr, "Failed: {}", res.error().message());
 						}
 					},
 					asio::detached);

@@ -122,10 +122,8 @@ void VoiceConnection::Impl::opus_sender_loop() {
 					now - next_send_time)
 					.count();
 			if (drift_ms > 100) {
-				impl->log(
-					fmt::format("Large timing drift detected: {}ms, resetting",
-								drift_ms),
-					LogLevel::Warn);
+				impl->m_logger.warn(
+					"Large timing drift detected: {}ms, resetting", drift_ms);
 				next_send_time = now;
 			}
 
@@ -141,39 +139,68 @@ void VoiceConnection::Impl::opus_sender_loop() {
 
 		void send(AudioPacket pkt) {
 			if (!impl->m_udp) {
+				impl->m_logger.debug("Dropping packet: UDP not initialized");
 				impl->m_pending_frames--;
 				return;
 			}
 
-			if (impl->m_dave_manager->is_e2ee_enabled() &&
-				!impl->m_dave_manager->ready_to_send()) {
+			// Debug Logging regarding DAVE State (Once)
+			static bool dave_log_once{};
+			if (!dave_log_once && impl->m_dave && impl->m_dave->encryptor &&
+				impl->m_dave->encryptor->has_key_ratchet()) {
+				dave_log_once = true;
+				impl->m_logger.info(
+					"DAVE Ready for Encryption! Protocol Version: {}",
+					(int)impl->m_dave->encryptor->get_protocol_version());
+			}
+
+			// Check if DAVE (E2EE) is ready for encryption
+			bool dave_enabled =
+				impl->m_dave && impl->m_dave->encryptor &&
+				!impl->m_dave->encryptor->is_passthrough_mode() &&
+				impl->m_dave->encryptor->has_key_ratchet();
+
+			impl->m_logger.trace(
+				"Sending packet: seq={}, ts={}, len={}, dave={}",
+				impl->m_rtp_sequence, impl->m_rtp_timestamp, pkt.encoded.size(),
+				dave_enabled);
+
+			// Log once if DAVE is expected but not ready yet
+			if (impl->m_dave && impl->m_dave->encryptor &&
+				!impl->m_dave->encryptor->is_passthrough_mode() &&
+				!impl->m_dave->encryptor->has_key_ratchet()) {
 				if (!impl->m_warned_waiting_for_e2ee) {
-					impl->log(
-						fmt::format("DAVE enabled but not ready at packet {}",
-									impl->m_packet_count.load()),
-						LogLevel::Warn);
+					impl->m_logger.warn(
+						"DAVE enabled but not ready at packet {} - sending "
+						"without E2EE",
+						impl->m_packet_count.load());
 					impl->m_warned_waiting_for_e2ee = true;
 				}
-				maintain_sync(pkt.frame_count);
-				impl->m_pending_frames--;
-				step();
-				return;
+				// NOTE: Do NOT drop packets! Continue to transport encryption.
 			}
 
 			boost::span<const std::byte> payload_view(
 				pkt.encoded.data(), pkt.encoded.size());
 			std::vector<std::byte> dave_ciphertext;
 
-			if (impl->m_dave_manager->is_e2ee_enabled()) {
-				size_t max_sz = impl->m_dave_manager->max_ciphertext_size(
-					discord::dave::MediaType::Audio, pkt.encoded.size());
+			if (dave_enabled) {
+				size_t max_sz =
+					impl->m_dave->encryptor->get_max_ciphertext_byte_size(
+						dave::MediaType::Audio, pkt.encoded.size());
 				dave_ciphertext.resize(max_sz);
 
-				auto res = impl->m_dave_manager->encrypt_frame(
-					discord::dave::MediaType::Audio, impl->m_ssrc, pkt.encoded,
-					dave_ciphertext);
-				if (!res) {
-					impl->log("DAVE encrypt failed", LogLevel::Error);
+				auto res = impl->m_dave->encryptor->encrypt(
+					dave::MediaType::Audio, impl->m_ssrc,
+					boost::span<const uint8_t>(
+						reinterpret_cast<const uint8_t *>(pkt.encoded.data()),
+						pkt.encoded.size()),
+					boost::span<uint8_t>(
+						reinterpret_cast<uint8_t *>(dave_ciphertext.data()),
+						dave_ciphertext.size()));
+
+				if (!res.has_value()) {
+					impl->m_logger.error(
+						"DAVE encrypt failed: {}", res.error().message());
 					impl->m_pending_frames--;
 					maintain_sync(pkt.frame_count);
 					step();
@@ -181,6 +208,7 @@ void VoiceConnection::Impl::opus_sender_loop() {
 				}
 
 				dave_ciphertext.resize(res.value());
+				impl->m_logger.trace("DAVE encrypted: {} bytes", res.value());
 				payload_view = boost::span<const std::byte>(
 					dave_ciphertext.data(), dave_ciphertext.size());
 			}
@@ -195,7 +223,7 @@ void VoiceConnection::Impl::opus_sender_loop() {
 			auto encrypted_pkt =
 				impl->m_crypto.encrypt_rtp(header, payload_view);
 			if (!encrypted_pkt) {
-				impl->log("Transport encrypt failed", LogLevel::Error);
+				impl->m_logger.error("Transport encrypt failed");
 				impl->m_pending_frames--;
 				maintain_sync(pkt.frame_count);
 				step();
@@ -208,19 +236,17 @@ void VoiceConnection::Impl::opus_sender_loop() {
 					Result<size_t> send_res) mutable {
 					if (!send_res) {
 						++me->consecutive_failures;
-						me->impl->log(fmt::format("UDP send failed ({}/10): {}",
-												  me->consecutive_failures,
-												  send_res.error().message()),
-									  LogLevel::Warn);
+						me->impl->m_logger.warn("UDP send failed ({}/10): {}",
+												me->consecutive_failures,
+												send_res.error().message());
 
 						me->impl->m_pending_frames--;
 						me->maintain_sync(frame_count);
 
 						if (me->consecutive_failures >= 10) {
-							me->impl->log(
+							me->impl->m_logger.error(
 								"Too many consecutive UDP send failures, "
-								"stopping sender",
-								LogLevel::Error);
+								"stopping sender");
 							return;	 // Stop sender loop.
 						}
 
