@@ -44,7 +44,9 @@ if(BUILD_SHARED_LIBS)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 endif()
 
-file(GLOB_RECURSE sources CONFIGURE_DEPENDS "include/*.hpp" "src/*.cpp")
+file(GLOB_RECURSE sources CONFIGURE_DEPENDS "include/*.hpp" "src/*.cpp"
+     "src/*.hpp"
+)
 
 add_library(ekizu ${sources})
 add_library(ekizu::ekizu ALIAS ekizu)
@@ -80,6 +82,7 @@ target_include_directories(
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated>
            $<INSTALL_INTERFACE:include>
+    PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 if(MSVC)

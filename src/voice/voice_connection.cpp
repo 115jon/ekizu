@@ -172,6 +172,15 @@ void VoiceConnectionConfig::connect_impl(
 		return;
 	}
 
+	auto repacketizer_res = create_repacketizer();
+	if (!repacketizer_res) {
+		post_via(executor, std::move(hex),
+				 [h = std::move(h), ec = repacketizer_res.error()]() mutable {
+					 std::move(h)(ec);
+				 });
+		return;
+	}
+
 	auto url = fmt::format("wss://{}/?v=8", *endpoint);
 
 	auto url_copy = url;
@@ -184,6 +193,7 @@ void VoiceConnectionConfig::connect_impl(
 		 state_copy = std::move(state_copy), token_copy = std::move(token_copy),
 		 decoder = std::move(decoder_res.value()),
 		 encoder = std::move(encoder_res.value()),
+		 repacketizer = std::move(repacketizer_res.value()),
 		 h = std::move(h)](Result<net::WebSocketClient> ws_res) mutable {
 			if (!ws_res) {
 				post_via(executor, std::move(hex),
@@ -196,8 +206,8 @@ void VoiceConnectionConfig::connect_impl(
 			auto impl = std::make_shared<VoiceConnection::Impl>(
 				executor, std::move(ws_res.value()), std::move(state_copy), url,
 				token_copy,
-				std::make_unique<Codec>(
-					std::move(decoder), std::move(encoder)));
+				std::make_unique<Codec>(std::move(decoder), std::move(encoder),
+										std::move(repacketizer)));
 
 			post_via(executor, std::move(hex),
 					 [h = std::move(h), impl = std::move(impl)]() mutable {

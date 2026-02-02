@@ -4,11 +4,12 @@
 #include <opus/opus.h>
 
 #include <boost/core/span.hpp>
-#include <ekizu/export.hpp>
 #include <ekizu/result.hpp>
 #include <memory>
 
 namespace ekizu {
+constexpr auto OPUS_MAX_PACKET_SIZE = 1275;
+
 template <typename T>
 struct DeleterOf;
 
@@ -26,11 +27,21 @@ struct DeleterOf<OpusEncoder> {
 	}
 };
 
+template <>
+struct DeleterOf<OpusRepacketizer> {
+	void operator()(OpusRepacketizer *repacketizer) const {
+		opus_repacketizer_destroy(repacketizer);
+	}
+};
+
 using UniqueOpusDecoder = std::unique_ptr<OpusDecoder, DeleterOf<OpusDecoder>>;
 using UniqueOpusEncoder = std::unique_ptr<OpusEncoder, DeleterOf<OpusEncoder>>;
+using UniqueOpusRepacketizer =
+	std::unique_ptr<OpusRepacketizer, DeleterOf<OpusRepacketizer>>;
 
 struct Codec {
-	Codec(UniqueOpusDecoder decoder, UniqueOpusEncoder encoder);
+	Codec(UniqueOpusDecoder decoder, UniqueOpusEncoder encoder,
+		  UniqueOpusRepacketizer repacketizer);
 
 	[[nodiscard]] Result<int> encode(boost::span<const int16_t> pcm,
 									 boost::span<std::byte> opus) const;
@@ -38,10 +49,12 @@ struct Codec {
    private:
 	UniqueOpusDecoder m_decoder;
 	UniqueOpusEncoder m_encoder;
+	UniqueOpusRepacketizer m_repacketizer;
 };
 
-[[nodiscard]] EKIZU_EXPORT Result<UniqueOpusDecoder> create_decoder();
-[[nodiscard]] EKIZU_EXPORT Result<UniqueOpusEncoder> create_encoder();
+[[nodiscard]] Result<UniqueOpusDecoder> create_decoder();
+[[nodiscard]] Result<UniqueOpusEncoder> create_encoder();
+[[nodiscard]] Result<UniqueOpusRepacketizer> create_repacketizer();
 
 }  // namespace ekizu
 

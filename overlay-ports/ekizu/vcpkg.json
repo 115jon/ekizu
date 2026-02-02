@@ -16,6 +16,7 @@
       "default-features": false
     },
     "libsodium",
+    "mlspp",
     "nlohmann-json",
     "opus",
     "portaudio",
@@ -50,18 +51,6 @@
         }
       ]
     },
-    "disable-dave-logging": {
-      "description": "Disable DAVE protocol logging (enabled by default)",
-      "dependencies": [
-        {
-          "name": "libdave",
-          "default-features": false,
-          "features": [
-            "disable-logging"
-          ]
-        }
-      ]
-    },
     "openssl": {
       "description": "Build OpenSSL from source (disable for system OpenSSL)",
       "dependencies": [
@@ -84,7 +73,6 @@
   },
   "default-features": [
     "boost",
-    "disable-dave-logging",
     "openssl"
   ]
 }

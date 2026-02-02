@@ -12,7 +12,6 @@
 #include <boost/endian/conversion.hpp>
 #include <cstdint>
 #include <ekizu/logger.hpp>
-#include <ekizu/opus_codec.hpp>
 #include <ekizu/udp.hpp>
 #include <ekizu/voice_connection.hpp>
 #include <ekizu/ws.hpp>
@@ -27,6 +26,7 @@
 #include "../dave/decryptor.hpp"
 #include "../dave/encryptor.hpp"
 #include "../dave/session.hpp"
+#include "opus_codec.hpp"
 #include "voice_crypto.hpp"
 
 namespace ekizu {
